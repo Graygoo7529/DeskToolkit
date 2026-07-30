@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /Codex-Config
+    schedule:
+      interval: monthly
+  - package-ecosystem: cargo
+    directory: /Codex-Config/src-tauri
+    schedule:
+      interval: monthly
+  - package-ecosystem: npm
+    directory: /DeskFinger
+    schedule:
+      interval: monthly
+  - package-ecosystem: cargo
+    directory: /DeskFinger/src-tauri
+    schedule:
+      interval: monthly

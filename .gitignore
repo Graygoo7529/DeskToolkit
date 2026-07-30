@@ -1,0 +1,26 @@
+# JavaScript
+**/node_modules/
+**/dist/
+.pnpm-store/
+*.log
+*.local
+
+# Rust / Tauri
+**/src-tauri/target/
+**/src-tauri/gen/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
