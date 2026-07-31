@@ -1,0 +1,14 @@
+node_modules
+dist
+src-tauri/target
+src-tauri/gen
+
+# 本地机密配置（含 API Key，绝不入库）
+deskbot.local.json
+
+# 机器人工作区的运行时产物（保留人格文件）
+workspace/*
+!workspace/AGENTS.md
+
+*.log
+.DS_Store
