@@ -155,6 +155,43 @@ body {
   text-overflow: ellipsis;
 }
 
+.page-tabs {
+  display: flex;
+  gap: 6px;
+  margin: -12px 0 28px;
+  padding: 4px;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-soft);
+}
+
+.page-tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 18px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+
+.page-tab:hover {
+  color: var(--text);
+}
+
+.page-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent1), #4f8ff7);
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.28);
+}
+
 /* ---------- 区块 ---------- */
 
 .section {
@@ -227,7 +264,6 @@ body {
 
 .provider-card:hover {
   background: var(--card-hover);
-  transform: translateY(-2px);
   box-shadow: var(--shadow);
 }
 
@@ -266,7 +302,7 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 12px;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.15s;
 }
 
@@ -453,6 +489,8 @@ body {
   padding: 22px 24px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
   animation: pop 0.16s ease-out;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 @keyframes pop {
@@ -483,7 +521,14 @@ body {
   margin-bottom: 6px;
 }
 
-.field input {
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.field input, .field select {
   width: 100%;
   font: inherit;
   font-size: 13.5px;
@@ -498,7 +543,7 @@ body {
     box-shadow 0.15s;
 }
 
-.field input:focus {
+.field input:focus, .field select:focus {
   border-color: var(--accent1);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.22);
 }
@@ -561,6 +606,60 @@ body {
 
 .toast-error {
   border-left: 3px solid var(--danger);
+}
+
+/* Provider 查询与排序：各场景共享，结果始终归属对应卡片。 */
+.provider-grid { align-items: start; }
+.sortable-item { min-width: 0; border-radius: var(--radius); }
+.sortable-item.drop-target { outline: 2px dashed var(--accent2); outline-offset: 4px; }
+.drag-handle { border: 0; background: transparent; color: var(--text-dim); cursor: grab; padding: 1px 4px; font-size: 22px; line-height: 1; }
+.drag-handle:active { cursor: grabbing; }
+.drag-handle:disabled { opacity: .3; cursor: default; }
+.provider-name { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: left; font: inherit; font-size: 15px; font-weight: 650; border: 0; padding: 0; background: none; color: var(--text); cursor: pointer; }
+.batch-checkbox { display: flex; align-items: center; cursor: pointer; }
+input[type=checkbox] { accent-color: var(--accent1); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-soft); margin-bottom: 14px; font-size: 12px; }
+.batch-select { display: flex; align-items: center; gap: 8px; }
+.batch-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.batch-toolbar .btn, .probe-actions .btn { font-size: 12px; padding: 6px 10px; }
+.batch-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12px; padding: 0 2px 14px; }
+.batch-progress .btn { padding: 3px 8px; font-size: 11px; }
+.provider-inspection { border-top: 1px solid var(--border); margin: 14px -4px -6px; cursor: default; }
+.probe + .probe { border-top: 1px solid var(--border); }
+.probe summary { display: flex; gap: 8px; align-items: center; padding: 11px 4px; font-size: 12px; cursor: pointer; list-style: none; }
+.probe summary::before { content: '›'; color: var(--text-dim); transition: transform .12s; }
+.probe[open] summary::before { transform: rotate(90deg); }
+.probe-status { margin-left: auto; color: var(--text-dim); font-size: 11px; }
+.probe-status.ok { color: var(--ok); }
+.probe-status.partial, .stale { color: var(--warn); }
+.probe-status.error, .form-error { color: var(--danger); }
+.probe-status.pending { color: var(--accent2); }
+.probe-body { padding: 2px 4px 12px; }
+.probe-body .hint { font-size: 12px; line-height: 1.6; margin-bottom: 8px; overflow-wrap: anywhere; }
+.probe-time, .stale { font-size: 10.5px; line-height: 1.6; margin: 6px 0 10px; }
+.probe-time { color: var(--text-dim); }
+.probe-actions { display: flex; gap: 6px; margin-top: 12px; }
+.model-results .field { margin: 10px 0; }
+.model-list { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow-y: auto; user-select: text; }
+.model-list li { font-size: 12px; border-bottom: 1px solid var(--border); padding: 7px 0; overflow-wrap: anywhere; }
+.model-list small { display: block; color: var(--text-dim); }
+.metric-row { display: flex; justify-content: space-between; gap: 12px; margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.quota-window { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 2px; }
+.quota-window progress { width: 100%; height: 6px; accent-color: var(--ok); }
+.quota-window small { font-size: 10.5px; overflow-wrap: anywhere; }
+fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+fieldset h4 { color: var(--text); margin: 14px 0; font-size: 13px; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.form-error { font-size: 12px; overflow-wrap: anywhere; }
+.selection-hint { color: #a5b4fc; }
+button:focus-visible, summary:focus-visible, input[type=checkbox]:focus-visible { outline: 2px solid var(--accent2); outline-offset: 3px; }
+@media (max-width: 720px) {
+  .app { padding: 20px 16px; }
+  .topbar { flex-wrap: wrap; }
+  .datadir-chip { max-width: 100%; }
+  .home-card { flex-direction: column; align-items: stretch; }
+  .home-side { align-items: stretch; }
+  .batch-actions { margin-left: 0; }
 }
 
 @keyframes slide-in {

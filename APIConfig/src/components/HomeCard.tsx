@@ -1,6 +1,8 @@
 import type { Home, HomeStatus, Provider } from '../types'
+import type { ReactNode } from 'react'
 
 interface Props {
+  handle?: ReactNode
   home: Home
   status: HomeStatus | undefined
   selectedProvider: Provider | null
@@ -11,6 +13,7 @@ interface Props {
 }
 
 export default function HomeCard({
+  handle,
   home,
   status,
   selectedProvider,
@@ -23,6 +26,7 @@ export default function HomeCard({
     <div className="card home-card">
       <div className="home-main">
         <div className="card-head">
+          {handle}
           <span className="card-title">{home.name}</span>
           {status?.matched_provider ? (
             <span className="tag tag-ok">当前：{status.matched_provider}</span>
@@ -56,10 +60,10 @@ export default function HomeCard({
           {busy ? '应用中…' : selectedProvider ? `应用「${selectedProvider.name}」` : '应用 Provider'}
         </button>
         <div className="side-actions">
-          <button className="btn btn-ghost" onClick={onEdit}>
+          <button className="btn btn-ghost" disabled={busy} onClick={onEdit}>
             编辑
           </button>
-          <button className="btn btn-danger" onClick={onDelete}>
+          <button className="btn btn-danger" disabled={busy} onClick={onDelete}>
             删除
           </button>
         </div>

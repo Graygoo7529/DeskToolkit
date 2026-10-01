@@ -8,11 +8,11 @@ permissions:
   contents: read
 
 jobs:
-  codex-config:
+  apiconfig:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: Codex-Config
+        working-directory: APIConfig
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -22,12 +22,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: Codex-Config/pnpm-lock.yaml
+          cache-dependency-path: APIConfig/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm test
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 

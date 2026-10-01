@@ -10,7 +10,7 @@ function useEscape(onClose: () => void) {
   }, [onClose])
 }
 
-function ModalShell({
+export function ModalShell({
   title,
   children,
   onClose,

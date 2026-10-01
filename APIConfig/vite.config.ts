@@ -7,7 +7,7 @@ export default defineConfig({
   // 防止 vite 在 tauri dev 时清屏遮蔽 rust 输出
   clearScreen: false,
   server: {
-    port: 1420,
+    port: 1430,
     strictPort: true,
   },
   envPrefix: ['VITE_', 'TAURI_'],
