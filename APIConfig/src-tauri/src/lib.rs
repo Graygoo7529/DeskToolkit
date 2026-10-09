@@ -1,7 +1,9 @@
+mod api_manager;
 mod claude;
 mod codex;
 mod data;
 mod inspection;
+mod kimi;
 
 use data::{ClaudeHome, ClaudeProvider, Home, Provider};
 use serde::Serialize;
@@ -22,6 +24,7 @@ struct State {
 #[derive(Serialize)]
 struct ProviderView {
     name: String,
+    color: String,
     url: String,
     key_masked: String,
     inspection: inspection::InspectionSettings,
@@ -48,6 +51,7 @@ fn assemble(app: &AppHandle) -> Result<State, String> {
         .iter()
         .map(|provider| ProviderView {
             name: provider.name.clone(),
+            color: provider.color.clone(),
             url: provider.url.clone(),
             key_masked: codex::mask_key(&provider.key),
             inspection: provider.inspection.clone(),
@@ -69,6 +73,7 @@ fn assemble(app: &AppHandle) -> Result<State, String> {
         .iter()
         .map(|provider| ProviderView {
             name: provider.name.clone(),
+            color: provider.color.clone(),
             url: provider.url.clone(),
             key_masked: codex::mask_key(&provider.key),
             inspection: provider.inspection.clone(),
@@ -127,6 +132,7 @@ fn upsert<T>(
 
 #[tauri::command]
 fn get_state(app: AppHandle) -> Result<State, String> {
+    let _guard = data::lock()?;
     assemble(&app)
 }
 
@@ -137,6 +143,7 @@ fn save_home(
     name: String,
     location: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let name = name.trim().to_string();
     let location = location.trim().trim_matches('"').to_string();
     if name.is_empty() {
@@ -173,6 +180,7 @@ fn save_home(
 
 #[tauri::command]
 fn delete_home(app: AppHandle, name: String) -> Result<State, String> {
+    let _guard = data::lock()?;
     let mut homes = data::load_homes(&app)?;
     homes.retain(|h| h.name != name);
     data::save_homes(&app, &homes)?;
@@ -187,6 +195,7 @@ fn save_provider(
     url: String,
     key: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let name = name.trim().to_string();
     let url = url.trim().trim_matches('"').to_string();
     let key = key.trim().to_string();
@@ -212,6 +221,7 @@ fn save_provider(
         original_name.as_deref(),
         |p| &p.name,
         || Provider {
+            color: String::new(),
             name: name.clone(),
             url: url.clone(),
             key: key.clone(),
@@ -232,6 +242,7 @@ fn save_provider(
 
 #[tauri::command]
 fn delete_provider(app: AppHandle, name: String) -> Result<State, String> {
+    let _guard = data::lock()?;
     let mut providers = data::load_providers(&app)?;
     providers.retain(|p| p.name != name);
     data::save_providers(&app, &providers)?;
@@ -245,6 +256,7 @@ fn save_claude_home(
     name: String,
     location: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let name = name.trim().to_string();
     let location = location.trim().trim_matches('"').to_string();
     if name.is_empty() {
@@ -281,6 +293,7 @@ fn save_claude_home(
 
 #[tauri::command]
 fn delete_claude_home(app: AppHandle, name: String) -> Result<State, String> {
+    let _guard = data::lock()?;
     let mut homes = data::load_claude_homes(&app)?;
     homes.retain(|home| home.name != name);
     data::save_claude_homes(&app, &homes)?;
@@ -295,6 +308,7 @@ fn save_claude_provider(
     url: String,
     key: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let name = name.trim().to_string();
     let url = url.trim().trim_matches('"').to_string();
     let key = key.trim().to_string();
@@ -320,6 +334,7 @@ fn save_claude_provider(
         original_name.as_deref(),
         |provider| &provider.name,
         || ClaudeProvider {
+            color: String::new(),
             name: name.clone(),
             url: url.clone(),
             key: key.clone(),
@@ -340,6 +355,7 @@ fn save_claude_provider(
 
 #[tauri::command]
 fn delete_claude_provider(app: AppHandle, name: String) -> Result<State, String> {
+    let _guard = data::lock()?;
     let mut providers = data::load_claude_providers(&app)?;
     providers.retain(|provider| provider.name != name);
     data::save_claude_providers(&app, &providers)?;
@@ -352,6 +368,7 @@ fn apply_provider(
     home_name: String,
     provider_name: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let homes = data::load_homes(&app)?;
     let providers = data::load_providers(&app)?;
     let home = homes
@@ -372,6 +389,7 @@ fn apply_claude_provider(
     claude_home_name: String,
     claude_provider_name: String,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let homes = data::load_claude_homes(&app)?;
     let providers = data::load_claude_providers(&app)?;
     let home = homes
@@ -388,10 +406,22 @@ fn apply_claude_provider(
 
 #[tauri::command]
 fn open_data_dir(app: AppHandle) -> Result<(), String> {
+    let _guard = data::lock()?;
     let dir = data::data_dir(&app)?;
     tauri_plugin_opener::OpenerExt::opener(&app)
         .open_path(dir.display().to_string(), None::<&str>)
         .map_err(|e| format!("打开目录失败：{e}"))
+}
+
+#[tauri::command]
+fn change_data_dir(
+    app: AppHandle,
+    path: String,
+    mode: data::DirectoryMode,
+) -> Result<State, String> {
+    let _guard = data::lock()?;
+    data::change_dir(&app, &path, mode)?;
+    assemble(&app)
 }
 
 #[derive(serde::Deserialize, Clone, Copy)]
@@ -422,10 +452,13 @@ async fn inspect_provider(
     name: String,
     task: inspection::Task,
 ) -> Result<inspection::ProbeResult, String> {
-    let provider = providers_for(&app, scene)?
-        .into_iter()
-        .find(|p| p.name == name)
-        .ok_or("Provider 已被删除，请刷新后重试")?;
+    let provider = {
+        let _guard = data::lock()?;
+        providers_for(&app, scene)?
+            .into_iter()
+            .find(|p| p.name == name)
+            .ok_or("Provider 已被删除，请刷新后重试")?
+    };
     Ok(inspection::inspect(provider, matches!(scene, Scene::Claude), task).await)
 }
 
@@ -436,6 +469,7 @@ fn save_inspection(
     name: String,
     settings: inspection::InspectionSettings,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     let mut providers = providers_for(&app, scene)?;
     let provider = providers
         .iter_mut()
@@ -478,6 +512,7 @@ fn reorder_items(
     kind: ListKind,
     names: Vec<String>,
 ) -> Result<State, String> {
+    let _guard = data::lock()?;
     match (scene, kind) {
         (Scene::Codex, ListKind::Providers) => data::save_providers(
             &app,
@@ -541,9 +576,19 @@ pub fn run() {
             delete_claude_provider,
             apply_claude_provider,
             open_data_dir,
+            change_data_dir,
             inspect_provider,
             save_inspection,
             reorder_items,
+            kimi::get_kimi_config,
+            kimi::save_kimi_config,
+            kimi::import_kimi_config,
+            kimi::query_kimi_quota,
+            api_manager::get_api_accounts,
+            api_manager::save_api_account,
+            api_manager::delete_api_account,
+            api_manager::probe_api_account,
+            api_manager::check_api_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

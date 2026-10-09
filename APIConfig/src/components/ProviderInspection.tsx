@@ -41,7 +41,7 @@ export default function ProviderInspection({ results = {}, busy, configuredQuota
   onRun: (task: ProbeTask) => void
   onSettings: () => void
 }) {
-  return <div className="provider-inspection" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+  return <div className="provider-inspection">
     {(['connection', 'models', 'quota'] as const).map((task) => {
       const slot = results[task] ?? {}
       const result = slot.result

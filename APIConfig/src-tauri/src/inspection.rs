@@ -377,6 +377,154 @@ async fn get_json(
     Ok((body, status))
 }
 
+async fn post_json(url: Url, key: &str, body: Value) -> Result<(Value, u16), RequestError> {
+    let mut response = HTTP
+        .post(url)
+        .bearer_auth(key)
+        .header("x-api-key", key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| RequestError {
+            message: if e.is_timeout() {
+                "请求超时（12 秒）"
+            } else if e.is_connect() {
+                "无法连接，请检查网络、域名和 TLS"
+            } else {
+                "请求失败，请检查地址和认证设置"
+            }
+            .into(),
+            status: None,
+        })?;
+    let status = response.status().as_u16();
+    if !response.status().is_success() {
+        let reason = match status {
+            401 | 403 => "认证失败或无权限",
+            404 | 405 => "接口不支持或路径不存在",
+            429 => "请求限流，请稍后重试",
+            500..=599 => "服务端错误",
+            _ => "请求被拒绝",
+        };
+        return Err(RequestError {
+            message: format!("HTTP {status} · {reason}"),
+            status: Some(status),
+        });
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| RequestError {
+        message: "读取响应失败或超时".into(),
+        status: Some(status),
+    })? {
+        if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            return Err(RequestError {
+                message: "响应超过 2 MB，请缩小查询范围".into(),
+                status: Some(status),
+            });
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body = serde_json::from_slice(&bytes).map_err(|_| RequestError {
+        message: "接口未返回合法 JSON".into(),
+        status: Some(status),
+    })?;
+    Ok((body, status))
+}
+
+pub async fn probe_openai_model(url: &str, key: &str, model: &str) -> ProbeResult {
+    let _slot = SLOTS.acquire().await.expect("inspection semaphore");
+    let start = Instant::now();
+    let mut result = ProbeResult::new();
+    let endpoint = match endpoint(url, "", "chat/completions") {
+        Ok(value) => value,
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error;
+            return result;
+        }
+    };
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}]
+    });
+    let response = HTTP
+        .post(endpoint)
+        .bearer_auth(key)
+        .json(&body)
+        .send()
+        .await;
+    match response {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            result.http_status = Some(status);
+            if response.status().is_success() {
+                result.status = "ok".into();
+                result.message = format!("OpenAI 兼容接口可用 · {model}");
+            } else {
+                result.status = "error".into();
+                result.message = format!(
+                    "HTTP {status} · {}",
+                    match status {
+                        401 | 403 => "认证失败或无权限",
+                        404 | 405 => "模型或接口不存在",
+                        429 => "请求限流，请稍后重试",
+                        500..=599 => "服务端错误",
+                        _ => "请求被拒绝",
+                    }
+                );
+            }
+        }
+        Err(error) => {
+            result.status = "error".into();
+            result.message = if error.is_timeout() {
+                "请求超时（12 秒）"
+            } else if error.is_connect() {
+                "无法连接，请检查网络、域名和 TLS"
+            } else {
+                "请求失败，请检查地址和认证设置"
+            }
+            .into();
+        }
+    }
+    result.latency_ms = start.elapsed().as_millis() as u64;
+    result
+}
+
+/// Anthropic 兼容接口通常没有 GET /models，使用最多 1 个输出 token 做可用性探测。
+pub async fn probe_anthropic(url: &str, key: &str, model: &str) -> ProbeResult {
+    let _slot = SLOTS.acquire().await.expect("inspection semaphore");
+    let start = Instant::now();
+    let mut result = ProbeResult::new();
+    let endpoint = match endpoint(url, "", "messages") {
+        Ok(value) => value,
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error;
+            return result;
+        }
+    };
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}]
+    });
+    match post_json(endpoint, key, body).await {
+        Ok((_body, status)) => {
+            result.http_status = Some(status);
+            result.status = "ok".into();
+            result.message = format!("Anthropic 消息通道可用 · {model}");
+        }
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error.message;
+            result.http_status = error.status;
+        }
+    }
+    result.latency_ms = start.elapsed().as_millis() as u64;
+    result
+}
+
 pub async fn inspect(provider: crate::data::Provider, anthropic: bool, task: Task) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
@@ -626,6 +774,7 @@ mod tests {
 
     fn provider(url: String) -> crate::data::Provider {
         crate::data::Provider {
+            color: String::new(),
             name: "fixture".into(),
             url,
             key: "fixture-token".into(),

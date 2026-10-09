@@ -1,26 +1,33 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { inspectProvider } from './api'
 import type { ProbeResult, ProbeTask, ProviderResults, Scene } from './types'
 
 export function useInspections(scene: Scene) {
   const [results, setResults] = useState<Record<string, ProviderResults>>({})
   const [busy, setBusy] = useState(false)
+  const [background, setBackground] = useState(false)
   const [progress, setProgress] = useState({ total: 0, done: 0, ok: 0, partial: 0, error: 0, skipped: 0, cancelled: 0 })
   const active = useRef(false)
   const stopped = useRef(false)
+  const revisions = useRef<Record<string, number>>({})
+  useEffect(() => { stopped.current = false; return () => { stopped.current = true } }, [])
 
-  const invalidate = (name: string) => setResults((old) => {
-    const next = { ...old }
-    delete next[name]
-    return next
-  })
+  const invalidate = (name: string) => {
+    revisions.current[name] = (revisions.current[name] ?? 0) + 1
+    setResults((old) => {
+      const next = { ...old }
+      delete next[name]
+      return next
+    })
+  }
 
-  const run = async (names: string[], tasks: ProbeTask[]) => {
+  const run = async (names: string[], tasks: ProbeTask[], quiet = false) => {
     if (active.current || !names.length || !tasks.length) return
     active.current = true
     stopped.current = false
     setBusy(true)
-    const jobs = names.flatMap((name) => tasks.map((task) => ({ name, task })))
+    setBackground(quiet)
+    const jobs = names.flatMap((name) => tasks.map((task) => ({ name, task, revision: revisions.current[name] ?? 0 })))
     setProgress({ total: jobs.length, done: 0, ok: 0, partial: 0, error: 0, skipped: 0, cancelled: 0 })
     setResults((old) => {
       const next = { ...old }
@@ -30,7 +37,11 @@ export function useInspections(scene: Scene) {
     let cursor = 0
     const worker = async () => {
       while (!stopped.current && cursor < jobs.length) {
-        const { name, task } = jobs[cursor++]
+        const { name, task, revision } = jobs[cursor++]
+        if ((revisions.current[name] ?? 0) !== revision) {
+          setProgress((old) => ({ ...old, done: old.done + 1, skipped: old.skipped + 1 }))
+          continue
+        }
         setResults((old) => ({ ...old, [name]: { ...old[name], [task]: { ...old[name]?.[task], pending: 'running' } } }))
         let result: ProbeResult
         try {
@@ -38,7 +49,7 @@ export function useInspections(scene: Scene) {
         } catch (error) {
           result = { status: 'error', message: String(error), checked_at: Date.now(), latency_ms: 0, http_status: null, models: [], quota: null }
         }
-        setResults((old) => ({ ...old, [name]: { ...old[name], [task]: {
+        if ((revisions.current[name] ?? 0) === revision) setResults((old) => ({ ...old, [name]: { ...old[name], [task]: {
           result,
           lastGood: result.status === 'ok' || result.status === 'partial' ? result : old[name]?.[task]?.lastGood,
         } } }))
@@ -48,7 +59,9 @@ export function useInspections(scene: Scene) {
     await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, worker))
     setResults((old) => {
       const next = { ...old }
-      for (const { name, task } of jobs.slice(cursor)) next[name] = { ...next[name], [task]: { ...next[name]?.[task], pending: undefined } }
+      for (const { name, task, revision } of jobs.slice(cursor)) {
+        if ((revisions.current[name] ?? 0) === revision) next[name] = { ...next[name], [task]: { ...next[name]?.[task], pending: undefined } }
+      }
       return next
     })
     setProgress((old) => ({ ...old, cancelled: jobs.length - cursor }))
@@ -56,5 +69,5 @@ export function useInspections(scene: Scene) {
     setBusy(false)
   }
 
-  return { results, busy, progress, run, invalidate, stop: () => { stopped.current = true } }
+  return { results, busy, background, progress, run, invalidate, stop: () => { stopped.current = true } }
 }

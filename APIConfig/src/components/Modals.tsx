@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import Icon from './Icon'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { Home, Provider } from '../types'
 
@@ -14,16 +15,33 @@ export function ModalShell({
   title,
   children,
   onClose,
+  drawer = false,
 }: {
   title: string
   children: React.ReactNode
   onClose: () => void
+  drawer?: boolean
 }) {
   useEscape(onClose)
+  const id = useId()
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    const focusable = ref.current?.querySelector<HTMLElement>('input, select, button, [tabindex="0"]')
+    focusable?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [])
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <h3 className="modal-title">{title}</h3>
+    <div className={`overlay${drawer ? ' drawer-overlay' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`modal${drawer ? ' drawer' : ''}`} role="dialog" aria-modal="true" aria-labelledby={id} ref={ref}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return
+          const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]') ?? []).filter((el) => el.getClientRects().length)
+          const first = nodes[0], last = nodes[nodes.length - 1]
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+        }}>
+        <div className="dialog-head"><h3 className="modal-title" id={id}>{title}</h3><button className="icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div>
         {children}
       </div>
     </div>

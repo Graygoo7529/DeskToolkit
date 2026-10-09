@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { State, Scene, ProbeTask, ProbeResult, InspectionSettings } from './types'
+import type { State, Scene, ProbeTask, ProbeResult, InspectionSettings, KimiConfig, ApiAccount, ApiProbeResult } from './types'
 
 export const getState = () => invoke<State>('get_state')
 
@@ -38,6 +38,7 @@ export const applyClaudeProvider = (homeName: string, providerName: string) =>
   })
 
 export const openDataDir = () => invoke<void>('open_data_dir')
+export const changeDataDir = (path: string, mode: 'copy' | 'existing') => invoke<State>('change_data_dir', { path, mode })
 
 export const inspectProvider = (scene: Scene, name: string, task: ProbeTask) =>
   invoke<ProbeResult>('inspect_provider', { scene, name, task })
@@ -47,3 +48,16 @@ export const saveInspection = (scene: Scene, name: string, settings: InspectionS
 
 export const reorderItems = (scene: Scene, kind: 'providers' | 'homes', names: string[]) =>
   invoke<State>('reorder_items', { scene, kind, names })
+
+export const getKimiConfig = () => invoke<KimiConfig>('get_kimi_config')
+export const saveKimiConfig = (name: string, url: string, key: string) => invoke<KimiConfig>('save_kimi_config', { name, url, key })
+export const importKimiConfig = (path: string) => invoke<KimiConfig>('import_kimi_config', { path })
+export const queryKimiQuota = () => invoke<ProbeResult>('query_kimi_quota')
+
+export const getApiAccounts = () => invoke<ApiAccount[]>('get_api_accounts')
+export const saveApiAccount = (originalName: string | null, name: string, url: string, anthropicUrl: string, key: string) =>
+  invoke<ApiAccount[]>('save_api_account', { originalName, name, url, anthropicUrl, key })
+export const deleteApiAccount = (name: string) => invoke<ApiAccount[]>('delete_api_account', { name })
+export const probeApiAccount = (id: string) => invoke<ApiProbeResult>('probe_api_account', { id })
+export const checkApiModel = (id: string, model: string, protocol: 'openai' | 'anthropic') =>
+  invoke<ProbeResult>('check_api_model', { id, model, protocol })

@@ -1,50 +1,26 @@
-import type { ReactNode } from 'react'
-import type { Provider, ProviderResults, ProbeTask } from '../types'
-import ProviderInspection from './ProviderInspection'
+import type { Provider, ProviderResults } from '../types'
+import Icon from './Icon'
+import { providerStyle } from '../providerColor'
 
 interface Props {
-  provider: Provider
-  selected: boolean
-  checked: boolean
-  busy: boolean
-  handle: ReactNode
-  results?: ProviderResults
-  onCheck: () => void
-  onSelect: () => void
-  onEdit: () => void
-  onDelete: () => void
-  onSettings: () => void
-  onRun: (task: ProbeTask) => void
+  provider: Provider; selected: boolean; results?: ProviderResults; appliedCount: number
+  onSelect: () => void; onDetails: () => void
 }
 
-export default function ProviderCard({ provider, selected, checked, busy, handle, results, onCheck, onSelect, onEdit, onDelete, onSettings, onRun }: Props) {
-  return (
-    <div
-      className={`card provider-card${selected ? ' selected' : ''}`}
-      onClick={onSelect}
-    >
-      <div className="card-head">
-        <span onClick={(e) => e.stopPropagation()}>{handle}</span>
-        <label className="batch-checkbox" onClick={(e) => e.stopPropagation()} title="勾选用于批量查询">
-          <input type="checkbox" aria-label={`批量选择 ${provider.name}`} checked={checked} disabled={busy} onChange={onCheck} />
-        </label>
-        <button className="provider-name" aria-pressed={selected} onClick={(e) => { e.stopPropagation(); onSelect() }}>{provider.name}</button>
-        {selected && <span className="tag tag-accent">待应用</span>}
-      </div>
-      <div className="card-row mono" title={provider.url}>
-        {provider.url}
-      </div>
-      <div className="card-row mono dim">{provider.key_masked}</div>
-      <div className="card-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="btn btn-ghost" disabled={busy} onClick={onEdit}>
-          编辑
-        </button>
-        <button className="btn btn-ghost" disabled={busy} onClick={onSettings}>查询设置</button>
-        <button className="btn btn-danger" disabled={busy} onClick={onDelete}>
-          删除
-        </button>
-      </div>
-      <ProviderInspection results={results} busy={busy} configuredQuota={provider.inspection.quota.adapter !== 'none'} onRun={onRun} onSettings={onSettings} />
+export default function ProviderCard({ provider, selected, results, appliedCount, onSelect, onDetails }: Props) {
+  const connection = results?.connection
+  const status = connection?.pending ? 'pending' : connection?.result?.status ?? 'idle'
+  const label = { idle: '尚未检查', pending: '正在检查连接', ok: '连接可用', partial: '连接部分可用', error: '连接异常', skipped: '未检查' }[status]
+  let host = provider.url
+  try { host = new URL(provider.url).host } catch { /* 保留原地址 */ }
+  return <article style={providerStyle(provider)} className={`provider-card connection-${status}${selected ? ' selected' : ''}`} onClick={onSelect}>
+    <div className="provider-avatar" aria-hidden="true">{provider.name.slice(0, 1).toUpperCase()}</div>
+    <div className="provider-main">
+      <button className="provider-name" data-drag-surface aria-pressed={selected} onClick={(e) => { e.stopPropagation(); onSelect() }}>{provider.name}</button>
+      <div className="provider-meta"><div className="provider-url" title={provider.url}>{host}</div>{appliedCount > 0 && <span className="applied-count" title={`已应用到 ${appliedCount} 个目标`}>{appliedCount} 个目标</span>}</div>
     </div>
-  )
+    <span className={`health-dot ${status}`} role="img" aria-label={label} title={`${label}${connection?.result ? ` · ${connection.result.latency_ms} ms` : ''}`} />
+    {selected && <span className="selected-mark" title="待应用"><Icon name="check" size={15} /></span>}
+    <button className="icon-btn provider-details" aria-label={`查看 ${provider.name} 详情`} title="连接、模型、额度与管理" onClick={(e) => { e.stopPropagation(); onDetails() }}><Icon name="more" size={17} /></button>
+  </article>
 }

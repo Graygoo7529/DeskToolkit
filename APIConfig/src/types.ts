@@ -5,6 +5,7 @@ export interface Home {
 
 export interface Provider {
   name: string
+  color: string
   url: string
   key_masked: string
   inspection: InspectionSettings
@@ -80,3 +81,26 @@ export interface ProbeSlot {
   lastGood?: ProbeResult
 }
 export type ProviderResults = Partial<Record<ProbeTask, ProbeSlot>>
+
+export interface KimiConfig {
+  name: string
+  url: string
+  key_masked: string
+  configured: boolean
+}
+
+export interface ApiAccount {
+  id: string
+  kind: 'api' | 'kimi'
+  name: string
+  url: string
+  anthropic_url: string
+  key_masked: string
+  color: string
+  configured: boolean
+}
+
+export interface ApiProbeResult {
+  models: ProbeResult
+  quota: ProbeResult | null
+}
