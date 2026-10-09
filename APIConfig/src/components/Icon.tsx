@@ -12,6 +12,7 @@ const paths = {
   check: 'm5 12 4 4L19 6',
   layers: 'm12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5',
   bolt: 'm13 2-9 12h7l-1 8 10-13h-8l1-7Z',
+  external: 'M14 5h5v5m0-5-8 8M19 14v5H5V5h5',
 } as const
 
 export default function Icon({ name, size = 18, style }: { name: keyof typeof paths; size?: number; style?: CSSProperties }) {

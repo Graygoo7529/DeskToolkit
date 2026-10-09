@@ -7,7 +7,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
-pub const FILES: [&str; 4] = ["codex.toml", "claude.toml", "kimi.toml", "apis.toml"];
+pub const FILES: [&str; 3] = ["codex.toml", "claude.toml", "apis.toml"];
+const KIMI_LEGACY: &str = "kimi.toml";
 const LEGACY: [&str; 5] = [
     "homes.toml",
     "providers.toml",
@@ -59,11 +60,31 @@ pub struct Provider {
 }
 pub type ClaudeProvider = Provider;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountKind {
+    Subscription,
+    #[default]
+    Direct,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiAccount {
     pub name: String,
-    pub url: String,
     #[serde(default)]
+    pub kind: AccountKind,
+    #[serde(default)]
+    pub endpoints: Vec<crate::api_probe::ApiEndpoint>,
+    #[serde(default)]
+    pub quota: crate::api_probe::ApiQuotaSettings,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub console_url: String,
+    #[serde(default)]
+    pub declared_models: Vec<String>,
+    // Kept only so version 1 apis.toml files can be upgraded in place.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub anthropic_url: String,
     pub key: String,
     #[serde(default)]
@@ -76,13 +97,16 @@ struct ApiFile {
     version: u32,
     #[serde(default)]
     accounts: Vec<ApiAccount>,
+    #[serde(default)]
+    kimi_imported: bool,
 }
 
 impl Default for ApiFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             accounts: vec![],
+            kimi_imported: false,
         }
     }
 }
@@ -105,7 +129,7 @@ impl Default for SceneFile {
     }
 }
 #[derive(Serialize, Deserialize)]
-pub struct KimiAccount {
+struct KimiAccount {
     pub name: String,
     pub url: String,
     pub key: String,
@@ -205,25 +229,63 @@ fn validate_scene(value: &SceneFile) -> Result<(), String> {
 }
 
 fn validate_api_file(value: &ApiFile) -> Result<(), String> {
-    if value.version != 1 {
+    if value.version != 2 {
         return Err("API 配置版本不受支持，请使用更新版本的 APIConfig".into());
     }
     let mut names = std::collections::HashSet::new();
-    if value.accounts.iter().any(|a| {
-        a.name.trim().is_empty()
-            || a.key.trim().is_empty()
-            || !names.insert(a.name.as_str())
-            || endpoint_is_invalid(&a.url)
-            || (!a.anthropic_url.trim().is_empty() && endpoint_is_invalid(&a.anthropic_url))
-    }) {
-        return Err("API 配置中有空字段、重名或无效地址，请先修正".into());
+    for account in &value.accounts {
+        if !names.insert(account.name.as_str()) {
+            return Err("API 配置中有重名账号".into());
+        }
+        crate::api_probe::validate_account(account)?;
     }
     Ok(())
 }
 
-fn endpoint_is_invalid(value: &str) -> bool {
-    let value = value.trim();
-    value.is_empty() || (!value.starts_with("http://") && !value.starts_with("https://"))
+pub fn default_console_url(account: &ApiAccount) -> Option<&'static str> {
+    let address = account
+        .endpoints
+        .iter()
+        .map(|endpoint| endpoint.url.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if address.contains("aliyuncs.com") || address.contains("token-plan.") {
+        Some("https://bailian.console.aliyun.com/")
+    } else if address.contains("deepseek.com") {
+        Some("https://platform.deepseek.com/")
+    } else if address.contains("bigmodel.cn") {
+        Some("https://open.bigmodel.cn/usercenter/apikeys")
+    } else if address.contains("moonshot.cn") {
+        Some("https://platform.moonshot.cn/console/api-keys")
+    } else if address.contains("minimaxi.com") || address.contains("minimax.cn") {
+        Some("https://platform.minimaxi.com/")
+    } else if address.contains("zhizengzeng.com") {
+        Some("https://platform.zhizengzeng.com/")
+    } else if address.contains("api.kimi.com") || address.contains("platform.kimi.com") {
+        Some("https://platform.kimi.com/")
+    } else if address.contains("orcarouter.ai") {
+        Some("https://www.orcarouter.ai/console/keys")
+    } else {
+        None
+    }
+}
+
+fn archive_legacy(dir: &Path, file: &str) -> Result<(), String> {
+    let source = dir.join(file);
+    if !source.exists() {
+        return Ok(());
+    }
+    let backup = dir.join("legacy-backup");
+    fs::create_dir_all(&backup).map_err(|_| "无法创建旧配置备份目录")?;
+    let mut target = backup.join(file);
+    let mut suffix = 1;
+    while target.exists() {
+        target = backup.join(format!("{file}.{suffix}.bak"));
+        suffix += 1;
+    }
+    fs::rename(source, target).map_err(|_| "旧配置归档失败，请检查目录权限")?;
+    Ok(())
 }
 /// 完整验证各场景后写入新布局，再把原文件移至 legacy-backup。
 pub fn prepare_dir(dir: &Path) -> Result<(), String> {
@@ -255,9 +317,9 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
         let colors_changed = normalize_colors(&mut scene.providers);
         scenes.push((file, scene, !exists || colors_changed));
     }
-    let kimi_exists = dir.join(FILES[2]).exists();
+    let kimi_exists = dir.join(KIMI_LEGACY).exists();
     let kimi: KimiFile = if kimi_exists {
-        read(&dir.join(FILES[2]))?
+        read(&dir.join(KIMI_LEGACY))?
     } else if dir.join(LEGACY[4]).exists() {
         let text = fs::read_to_string(dir.join(LEGACY[4])).map_err(|_| "无法读取旧 Kimi 配置")?;
         KimiFile {
@@ -271,37 +333,146 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
     if kimi.version != 1 {
         return Err("Kimi 配置版本不受支持".into());
     }
-    let api_path = dir.join(FILES[3]);
-    if api_path.exists() {
-        let api: ApiFile = read(&api_path)?;
-        validate_api_file(&api)?;
+    let api_path = dir.join(FILES[2]);
+    let mut api: ApiFile = if api_path.exists() {
+        read(&api_path)?
     } else {
-        write(&api_path, &ApiFile::default())?;
+        ApiFile::default()
+    };
+    let mut api_changed = false;
+    if api.version == 1 {
+        for account in &mut api.accounts {
+            if account.endpoints.is_empty() {
+                if !account.url.trim().is_empty() {
+                    account.endpoints.push(crate::api_probe::ApiEndpoint::new(
+                        crate::api_probe::Protocol::Openai,
+                        &account.url,
+                    ));
+                }
+                if !account.anthropic_url.trim().is_empty() {
+                    account.endpoints.push(crate::api_probe::ApiEndpoint::new(
+                        crate::api_probe::Protocol::Anthropic,
+                        &account.anthropic_url,
+                    ));
+                }
+            }
+            if account.endpoints.iter().any(|endpoint| {
+                endpoint.url.contains("token-plan.") || endpoint.url.contains("/coding")
+            }) {
+                account.kind = AccountKind::Subscription;
+            }
+            if account.quota.adapter == crate::api_probe::QuotaAdapter::None {
+                let address = account
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| endpoint.url.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                account.quota.adapter = if address.contains("api.kimi.com/coding") {
+                    crate::api_probe::QuotaAdapter::Kimi
+                } else if address.contains("deepseek.com") {
+                    crate::api_probe::QuotaAdapter::Deepseek
+                } else if address.contains("moonshot.cn") {
+                    crate::api_probe::QuotaAdapter::Moonshot
+                } else if address.contains("zhizengzeng.com") {
+                    crate::api_probe::QuotaAdapter::Zhizz
+                } else {
+                    crate::api_probe::QuotaAdapter::None
+                };
+            }
+            account.url.clear();
+            account.anthropic_url.clear();
+        }
+        api.version = 2;
+        api_changed = true;
     }
+    if !api.kimi_imported && !kimi.account.key.trim().is_empty() {
+        let already = api
+            .accounts
+            .iter()
+            .any(|account| account.key == kimi.account.key);
+        if !already {
+            let mut name = kimi.account.name.clone();
+            let mut suffix = 2;
+            while api.accounts.iter().any(|account| account.name == name) {
+                name = format!("{} ({suffix})", kimi.account.name);
+                suffix += 1;
+            }
+            api.accounts.push(ApiAccount {
+                name,
+                kind: AccountKind::Subscription,
+                endpoints: vec![crate::api_probe::ApiEndpoint::new(
+                    crate::api_probe::Protocol::Openai,
+                    &kimi.account.url,
+                )],
+                quota: crate::api_probe::ApiQuotaSettings {
+                    adapter: crate::api_probe::QuotaAdapter::Kimi,
+                    ..Default::default()
+                },
+                console_url: "https://platform.kimi.com/".into(),
+                key: kimi.account.key.clone(),
+                color: "#9CA9FF".into(),
+                url: String::new(),
+                anthropic_url: String::new(),
+                declared_models: vec![],
+            });
+        }
+        api.kimi_imported = true;
+        api_changed = true;
+    }
+    for (index, account) in api.accounts.iter_mut().enumerate() {
+        if account.quota.adapter == crate::api_probe::QuotaAdapter::None {
+            let address = account
+                .endpoints
+                .iter()
+                .map(|endpoint| endpoint.url.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let inferred = if address.contains("api.kimi.com/coding") {
+                crate::api_probe::QuotaAdapter::Kimi
+            } else if address.contains("deepseek.com") {
+                crate::api_probe::QuotaAdapter::Deepseek
+            } else if address.contains("moonshot.cn") {
+                crate::api_probe::QuotaAdapter::Moonshot
+            } else if address.contains("zhizengzeng.com") {
+                crate::api_probe::QuotaAdapter::Zhizz
+            } else if address.contains("tokenadvent.com") || address.contains("/v1/usage") {
+                crate::api_probe::QuotaAdapter::Sub2api
+            } else if address.contains("minimaxi.com") || address.contains("minimax") {
+                crate::api_probe::QuotaAdapter::Minimax
+            } else {
+                crate::api_probe::QuotaAdapter::None
+            };
+            if inferred != crate::api_probe::QuotaAdapter::None {
+                account.quota.adapter = inferred;
+                api_changed = true;
+            }
+        }
+        if account.color.len() != 7 || !account.color.starts_with('#') {
+            account.color = PALETTE[index % PALETTE.len()].into();
+            api_changed = true;
+        }
+        if account.console_url.trim().is_empty() {
+            if let Some(url) = default_console_url(account) {
+                account.console_url = url.into();
+                api_changed = true;
+            }
+        }
+    }
+    api.version = 2;
+    validate_api_file(&api)?;
     for (file, scene, changed) in &scenes {
         if *changed {
             write(&dir.join(file), scene)?;
         }
     }
-    if !kimi_exists {
-        write(&dir.join(FILES[2]), &kimi)?;
+    if api_changed || !api_path.exists() {
+        write(&api_path, &api)?;
     }
     for file in LEGACY {
-        let source = dir.join(file);
-        if !source.exists() {
-            continue;
-        }
-        let backup = dir.join("legacy-backup");
-        fs::create_dir_all(&backup).map_err(|_| "新配置已生成，但无法创建旧配置备份目录")?;
-        let target = backup.join(file);
-        if target.exists() {
-            return Err(
-                "新配置已生成，但旧配置备份已存在；请检查 legacy-backup 后移走根目录中的旧文件"
-                    .into(),
-            );
-        }
-        fs::rename(source, target).map_err(|_| "新配置已生成，但旧配置归档失败，请检查目录权限")?;
+        archive_legacy(dir, file)?;
     }
+    archive_legacy(dir, KIMI_LEGACY)?;
     Ok(())
 }
 fn default_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -460,29 +631,17 @@ pub fn save_claude_homes(app: &AppHandle, values: &[ClaudeHome]) -> Result<(), S
 pub fn save_claude_providers(app: &AppHandle, values: &[ClaudeProvider]) -> Result<(), String> {
     update_scene(app, FILES[1], |s| s.providers = values.to_vec())
 }
-pub fn load_kimi(app: &AppHandle) -> Result<KimiAccount, String> {
-    Ok(read::<KimiFile>(&data_dir(app)?.join(FILES[2]))?.account)
-}
-pub fn save_kimi(app: &AppHandle, account: KimiAccount) -> Result<(), String> {
-    write(
-        &data_dir(app)?.join(FILES[2]),
-        &KimiFile {
-            version: 1,
-            account,
-        },
-    )
-}
-
 pub fn load_api_accounts(app: &AppHandle) -> Result<Vec<ApiAccount>, String> {
-    let file: ApiFile = read(&data_dir(app)?.join(FILES[3]))?;
+    let file: ApiFile = read(&data_dir(app)?.join(FILES[2]))?;
     validate_api_file(&file)?;
     Ok(file.accounts)
 }
 
 pub fn save_api_accounts(app: &AppHandle, accounts: &[ApiAccount]) -> Result<(), String> {
     let mut file = ApiFile {
-        version: 1,
+        version: 2,
         accounts: accounts.to_vec(),
+        kimi_imported: true,
     };
     for (index, account) in file.accounts.iter_mut().enumerate() {
         if account.color.len() != 7 || !account.color.starts_with('#') {
@@ -490,7 +649,7 @@ pub fn save_api_accounts(app: &AppHandle, accounts: &[ApiAccount]) -> Result<(),
         }
     }
     validate_api_file(&file)?;
-    write(&data_dir(app)?.join(FILES[3]), &file)
+    write(&data_dir(app)?.join(FILES[2]), &file)
 }
 
 #[cfg(test)]
@@ -532,8 +691,10 @@ mod storage_tests {
         let claude: SceneFile = read(&dir.path().join(FILES[1])).unwrap();
         assert_eq!(claude.providers[0].key, "fixture-claude");
         assert_eq!(claude.homes[0].location, "D:\\ClaudeData");
-        let kimi: KimiFile = read(&dir.path().join(FILES[2])).unwrap();
-        assert_eq!(kimi.account.key, "fixture-kimi");
+        let apis: ApiFile = read(&dir.path().join(FILES[2])).unwrap();
+        assert_eq!(apis.accounts[0].key, "fixture-kimi");
+        assert!(apis.accounts[0].quota.adapter == crate::api_probe::QuotaAdapter::Kimi);
+        assert!(!dir.path().join(KIMI_LEGACY).exists());
         for (file, bytes) in LEGACY.iter().zip(old) {
             assert!(!dir.path().join(file).exists());
             assert_eq!(

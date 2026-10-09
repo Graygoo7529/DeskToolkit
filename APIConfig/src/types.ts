@@ -82,25 +82,25 @@ export interface ProbeSlot {
 }
 export type ProviderResults = Partial<Record<ProbeTask, ProbeSlot>>
 
-export interface KimiConfig {
-  name: string
-  url: string
-  key_masked: string
-  configured: boolean
-}
-
 export interface ApiAccount {
   id: string
-  kind: 'api' | 'kimi'
+  kind: 'subscription' | 'direct'
   name: string
   url: string
-  anthropic_url: string
   key_masked: string
   color: string
   configured: boolean
+  endpoints: ApiEndpoint[]
+  quota_adapter: string
+  quota: ApiQuotaSettings
+  console_url: string
 }
 
+export type ApiProtocol = 'openai' | 'openai_responses' | 'anthropic' | 'genai' | 'vertexai'
+export interface ApiEndpoint { protocol: ApiProtocol; url: string; auth: Auth }
+export interface ApiQuotaSettings { adapter: string; path: string; auth: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
+
 export interface ApiProbeResult {
-  models: ProbeResult
+  model_sets: { protocol: ApiProtocol; result: ProbeResult }[]
   quota: ProbeResult | null
 }

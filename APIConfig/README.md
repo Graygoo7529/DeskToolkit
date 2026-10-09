@@ -1,6 +1,6 @@
 # APIConfig
 
-管理 Codex Home、Claude Code 配置目录与各自的 API Provider。双栏布局让左侧来源与右侧目标同时可见，额外查询和管理收纳进详情抽屉。独立 Kimi 分页展示订阅额度，API 分页用于管理不参与 Agent 应用的独立 API 账号。
+管理 Codex Home、Claude Code 配置目录与各自的 API Provider。双栏布局让左侧来源与右侧目标同时可见，额外查询和管理收纳进详情抽屉。API Probe 统一管理直连 API、订阅 API 与 Kimi 等服务，不参与 Agent 应用。
 
 ## 使用
 
@@ -23,17 +23,13 @@
 - 手动查询最多同时请求 3 项，单次 HTTP 超时 12 秒。“停止”只停止队列，已发出的请求正常结束。
 - 查询结果保留在本次应用会话，切换分页不丢失；修改 Provider 或查询设置后清除该 Provider 的旧结果。
 
-## Kimi 额度
-
-Kimi 分页独立展示周额度和 5 小时窗口的剩余比例、已用、总量、剩余和重置时间；有会员信息时显示会员等级。首次进入时查询一次，之后手动刷新。失败保留并标记上次可用数据，缺失值显示 `—`。
-
-通过“账号设置”填写 Kimi Code 的服务地址和 Key，或选择 DeskBot 的 `deskbot.local.json` 导入。导入只复制 `baseUrl` 和 `apiKey`，不修改 DeskBot；Key 保存在本机应用数据目录的 `kimi.toml` 的 `[account]`，界面仅接收掩码，不写进项目源码。编辑时 Key 留空保留原值。
-
 ## API 管理
 
-API 分页用于保存和检查独立 API 账号，不会把账号应用到 Codex、Claude 或其他 Agent。每个账号可配置 OpenAI 兼容地址和可选的 Anthropic 消息地址；“检查可用性”读取 `/models`，并对 Anthropic 地址发送一个最多 1 个输出 token 的最小探测请求。页面显示接口状态、延迟、模型列表和当前探测模型，Key 始终只显示掩码。
+API Probe 用一个账号模型保存直连或订阅类型、多个协议地址、额度适配器和控制台地址，不会把账号应用到 Codex、Claude 或其他 Agent。支持 OpenAI 兼容、OpenAI Responses、Anthropic、GenAI 和 VertexAI；刷新时按协议分别发现模型，详情中的协议胶囊切换模型集，单击模型才发起最小可用性探测。Key 始终只显示掩码。
 
-当前 Token Plan 地址的实测结果：OpenAI 兼容接口返回模型列表；Anthropic 地址支持 `/v1/messages`，但不提供 `/v1/models`。余额和剩余额度没有在该专属域名上发现可用的公开接口，因此页面明确显示“额度 / 限额：未接入”，不把调用成功率或模型数量冒充余额。
+账号列表的小圆点表示最近一次刷新状态；控制台地址以外链图标显示，点击后交给系统浏览器打开。可拖动账号排序，列表上方的刷新会并发刷新所有已配置账号。
+
+当前 Token Plan 地址的实测结果：OpenAI 兼容接口返回模型列表；Anthropic 地址支持消息调用，但不提供标准 `/models` 列表，因此刷新时保留其它协议返回的模型集。余额和剩余额度没有在该专属域名上发现可用的公开接口，因此页面明确显示“额度 / 限额：未接入”，不把调用成功率或模型数量冒充余额。
 
 ## 查询设置
 
@@ -48,12 +44,12 @@ API 分页用于保存和检查独立 API 账号，不会把账号应用到 Code
 - Codex 应用操作更新 `.codex/config.toml` 中 `[model_providers.OpenAI]` 的 `base_url` 和 `auth.json` 的 `OPENAI_API_KEY`。
 - Claude 应用操作只更新 `settings.json` 中的 `env.ANTHROPIC_BASE_URL` 与 `env.ANTHROPIC_AUTH_TOKEN`，保留其他设置。
 - 默认数据目录为 `%APPDATA%/com.codexconfig.panel/`，右上角“数据目录”可打开或更换本地目录。支持复制当前数据到新目录，或使用已有配置；目标已含配置时禁止复制覆盖。切换立即生效，重启继续沿用。
-- 文件按分页统一：`codex.toml` 和 `claude.toml` 各自保存 `[[homes]]`、`[[providers]]` 以及 Provider 查询设置；`kimi.toml` 的 `[account]` 保存 `name`、`url`、`key`。三个文件都有 `version = 1`。
-- `apis.toml` 保存独立 API 账号；它们只提供检查与模型管理，不加入 Provider → Home 应用流程。
+- 文件按分页统一：`codex.toml` 和 `claude.toml` 各自保存 `[[homes]]`、`[[providers]]` 以及 Provider 查询设置；`apis.toml` 保存所有 API Probe 账号、协议地址、额度适配器和控制台地址。
+- `apis.toml` 中的账号只提供检查与模型管理，不加入 Provider → Home 应用流程。Kimi 与其它 API 使用同一账号编辑器和同一配置文件。
 - 程序目录选择记录在默认目录的 `storage.json`，仅包含数据目录路径。切换目录只复制这三个场景文件，不移动真实的 Codex / Claude Home。
-- 旧版五个数据文件首次读取时自动迁移，原文件归档到同目录 `legacy-backup/`。先验证全部数据，再写入新结构；保留密钥、查询设置和列表顺序。
+- 旧版数据文件首次读取时自动迁移，原文件归档到同目录 `legacy-backup/`。先验证全部数据，再写入新结构；保留密钥、查询设置和列表顺序。迁移完成后不再注册独立 Kimi IPC 或独立编辑流程。
 - 查询设置保存在各 Provider 的 `inspection` 字段，排序保存为 TOML 数组顺序。旧记录会自动使用默认查询设置。Provider 的 `color` 保存固定身份色，改名和排序不改变颜色；连接状态仍由小圆点和详情文本单独表示。
-- Provider 和 Kimi Key 均保存在所选目录的 TOML；界面仅返回掩码。移除 Home 只移除面板记录，不删除真实配置目录。
+- Provider 和 API Key 均保存在所选目录的 TOML；界面仅返回掩码。移除 Home 只移除面板记录，不删除真实配置目录。
 
 ## 开发与验证
 
@@ -61,10 +57,13 @@ API 分页用于保存和检查独立 API 账号，不会把账号应用到 Code
 pnpm install
 pnpm tauri dev
 pnpm build
+pnpm release
 pnpm test
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
+
+正式版必须使用 `pnpm release` 构建。它会先生成前端资源，再由 Tauri 将资源嵌入原生程序并生成安装包；不要使用单独的 `cargo build --release` 作为发布构建。裸 exe 位于 `src-tauri/target/release/apiconfig.exe`，安装包位于 `src-tauri/target/release/bundle/`。
 
 调试端口为 **1430**。浏览器交互测试使用独立端口 **1431** 和本机 Microsoft Edge，以模拟数据替代 Tauri IPC，不读取实际用户配置或密钥。Rust HTTP 测试仅访问本地临时服务。
 

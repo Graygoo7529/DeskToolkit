@@ -24,7 +24,7 @@ export default function StorageModal({ current, onClose, onChange }: { current?:
   }
   return <ModalShell title="数据目录" onClose={() => !busy && onClose()}>
     {current && <div className="storage-current"><span className="eyebrow">当前使用</span><p>{current}</p><button className="text-btn" disabled={busy} onClick={() => api.openDataDir().catch((e) => setError(String(e)))}><Icon name="folder" size={14} />在文件管理器中打开</button></div>}
-    <div className="storage-files"><div><strong>codex.toml</strong><span>Codex Homes · Providers · 查询设置</span></div><div><strong>claude.toml</strong><span>Claude 配置目标 · Providers · 查询设置</span></div><div><strong>kimi.toml</strong><span>Kimi 账号 · 服务地址 · API Key</span></div><div><strong>apis.toml</strong><span>独立 API · 模型与可用性</span></div></div>
+    <div className="storage-files"><div><strong>codex.toml</strong><span>Codex Homes · Providers · 查询设置</span></div><div><strong>claude.toml</strong><span>Claude 配置目标 · Providers · 查询设置</span></div><div><strong>apis.toml</strong><span>API Probe 账号 · 协议 · 额度与控制台入口</span></div></div>
     <fieldset disabled={busy}>
       <label className="field"><span>新的数据目录</span><div className="input-with-btn"><input value={path} onChange={(e) => setPath(e.target.value)} placeholder="选择目录或输入绝对路径" /><button className="btn btn-ghost" onClick={browse}>选择目录</button></div></label>
       <div className="storage-modes" role="group" aria-label="目录切换方式">

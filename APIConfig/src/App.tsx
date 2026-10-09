@@ -8,7 +8,7 @@ import Toasts, { type Toast } from './components/Toasts'
 import ApiPanel from './components/ApiPanel'
 
 let toastSeq = 0
-const pages = [{ id: 'codex', title: 'Codex', mark: 'C' }, { id: 'claude', title: 'Claude', mark: '✳' }, { id: 'api', title: 'API 订阅', mark: 'A' }] as const
+const pages = [{ id: 'codex', title: 'Codex', mark: 'C' }, { id: 'claude', title: 'Claude', mark: '✳' }, { id: 'api', title: 'API Probe', mark: 'A' }] as const
 
 export default function App() {
   const [state, setState] = useState<State | null>(null)

@@ -1,9 +1,9 @@
 mod api_manager;
+mod api_probe;
 mod claude;
 mod codex;
 mod data;
 mod inspection;
-mod kimi;
 
 use data::{ClaudeHome, ClaudeProvider, Home, Provider};
 use serde::Serialize;
@@ -414,6 +414,16 @@ fn open_data_dir(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "控制台地址无效")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("控制台地址需为 HTTP(S) 地址".into());
+    }
+    tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>)
+        .map_err(|e| format!("打开控制台失败：{e}"))
+}
+
+#[tauri::command]
 fn change_data_dir(
     app: AppHandle,
     path: String,
@@ -576,17 +586,16 @@ pub fn run() {
             delete_claude_provider,
             apply_claude_provider,
             open_data_dir,
+            open_external_url,
             change_data_dir,
             inspect_provider,
             save_inspection,
             reorder_items,
-            kimi::get_kimi_config,
-            kimi::save_kimi_config,
-            kimi::import_kimi_config,
-            kimi::query_kimi_quota,
             api_manager::get_api_accounts,
+            api_manager::get_api_account_key,
             api_manager::save_api_account,
             api_manager::delete_api_account,
+            api_manager::reorder_api_accounts,
             api_manager::probe_api_account,
             api_manager::check_api_model,
         ])

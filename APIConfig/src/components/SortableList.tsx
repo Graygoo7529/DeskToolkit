@@ -41,7 +41,7 @@ export default function SortableList<T extends { name: string }>({ items, classN
   return <div className={className}>
     {items.map((item, index) => <div key={item.name} ref={(node) => { if (node) nodes.current.set(item.name, node); else nodes.current.delete(item.name) }}
       className={`sortable-item${over === item.name && over !== dragging ? ' drop-target' : ''}${dragging === item.name ? ' dragging' : ''}`}
-      role="group" aria-label={`排序 ${item.name}`} tabIndex={0} draggable={!disabled}
+      role="group" aria-label={`排序 ${item.name}`} aria-grabbed={dragging === item.name} aria-roledescription="可拖动项" tabIndex={0} draggable={!disabled}
       onPointerDownCapture={(e) => {
         const control = (e.target as HTMLElement).closest('button,input,select,summary,a')
         dragAllowed.current = !control || control.hasAttribute('data-drag-surface')
@@ -54,6 +54,7 @@ export default function SortableList<T extends { name: string }>({ items, classN
         e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', item.name)
       }}
       onDragEnd={finish}
+      onDragEnter={() => { if (!disabled && source.current !== null) setOver(item.name) }}
       onDragOver={(e) => { if (!disabled && source.current !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(item.name) } }}
       onDrop={(e) => {
         e.preventDefault()
