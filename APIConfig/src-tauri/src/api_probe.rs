@@ -44,13 +44,21 @@ impl ApiEndpoint {
 #[serde(rename_all = "snake_case")]
 pub enum QuotaAdapter {
     #[default]
+    #[serde(rename = "none")]
     None,
+    #[serde(rename = "quota_kimi", alias = "kimi")]
     Kimi,
+    #[serde(rename = "balance_deepseek", alias = "deepseek")]
     Deepseek,
+    #[serde(rename = "balance_moonshot", alias = "moonshot")]
     Moonshot,
+    #[serde(rename = "balance_zhizz", alias = "zhizz")]
     Zhizz,
+    #[serde(rename = "quota_sub2api", alias = "sub2api")]
     Sub2api,
+    #[serde(rename = "quota_minimax", alias = "minimax")]
     Minimax,
+    #[serde(rename = "balance_custom", alias = "custom")]
     Custom,
 }
 
@@ -452,8 +460,9 @@ fn parse_sub2api(body: &Value) -> Result<(inspection::Quota, bool), String> {
             );
         }
     }
-    if quota.windows.is_empty() {
-        quota.balance = json_number(body.get("remaining")).or_else(|| json_number(body.get("balance")));
+    quota.balance = json_number(body.get("balance"));
+    if quota.windows.is_empty() && quota.balance.is_none() {
+        quota.balance = json_number(body.get("remaining"));
     }
     let recognized = body.get("isValid").is_some()
         || body.get("mode").is_some()
@@ -533,6 +542,8 @@ pub async fn quota(account: &data::ApiAccount) -> inspection::ProbeResult {
     if q.adapter == QuotaAdapter::None {
         return result("skipped", "未配置额度查询适配器", None, start);
     }
+    let query_key = account.key.as_str();
+    let base_url = ep.url.as_str();
     let path = if q.path.trim().is_empty() {
         match q.adapter {
             QuotaAdapter::Deepseek => "/user/balance",
@@ -546,9 +557,9 @@ pub async fn quota(account: &data::ApiAccount) -> inspection::ProbeResult {
         q.path.as_str()
     };
     let url = if matches!(q.adapter, QuotaAdapter::Zhizz | QuotaAdapter::Sub2api | QuotaAdapter::Minimax) {
-        endpoint(&ep.url, path.trim_start_matches('/'))
+        endpoint(base_url, path.trim_start_matches('/'))
     } else {
-        let base = ep.url.trim_end_matches('/');
+        let base = base_url.trim_end_matches('/');
         Url::parse(&format!(
             "{base}{}",
             if path.starts_with('/') {
@@ -563,9 +574,9 @@ pub async fn quota(account: &data::ApiAccount) -> inspection::ProbeResult {
         return result("error", "额度查询地址无效", None, start);
     };
     let response = if q.adapter == QuotaAdapter::Zhizz {
-        post_json(url, &account.key, q.auth).await
+        post_json(url, query_key, q.auth).await
     } else {
-        get_json(url, &account.key, q.auth, None).await
+        get_json(url, query_key, q.auth, None).await
     };
     match response {
         Ok((body, status)) => {
@@ -762,6 +773,34 @@ mod tests {
         assert_eq!(quota.membership.as_deref(), Some("Claude Lite"));
         assert_eq!(quota.windows.len(), 1);
         assert_eq!(quota.windows[0].remaining, Some(49.9));
+    }
+
+    #[test]
+    fn sub2api_parses_wallet_balance_mode() {
+        let body = json!({
+            "isValid": true,
+            "mode": "balance",
+            "remaining": 12.5,
+            "unit": "USD",
+            "usage": { "total": { "cost": 2.0 } }
+        });
+        let (quota, partial) = parse_sub2api(&body).expect("sub2api balance response should parse");
+        assert!(!partial);
+        assert_eq!(quota.balance, Some(12.5));
+        assert!(quota.windows.is_empty());
+    }
+
+    #[test]
+    fn sub2api_parses_api_key_quota_mode() {
+        let body = json!({
+            "isValid": true,
+            "quota": { "used": 3, "limit": 10, "remaining": 7, "reset_at": "2026-10-10T00:00:00Z" }
+        });
+        let (quota, partial) = parse_sub2api(&body).expect("sub2api quota response should parse");
+        assert!(!partial);
+        assert_eq!(quota.windows.len(), 1);
+        assert_eq!(quota.windows[0].used, Some(3.0));
+        assert_eq!(quota.windows[0].remaining, Some(7.0));
     }
 
     #[test]

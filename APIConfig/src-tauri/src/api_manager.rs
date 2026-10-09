@@ -21,8 +21,21 @@ pub struct ApiAccountView {
     pub configured: bool,
     pub endpoints: Vec<ApiEndpointView>,
     pub quota_adapter: String,
-    pub quota: api_probe::ApiQuotaSettings,
+    pub quota: ApiQuotaView,
     pub console_url: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ApiQuotaView {
+    pub adapter: api_probe::QuotaAdapter,
+    pub path: String,
+    pub auth: crate::inspection::Auth,
+    pub balance_pointer: String,
+    pub used_pointer: String,
+    pub limit_pointer: String,
+    pub remaining_pointer: String,
+    pub reset_pointer: String,
+    pub unit: String,
 }
 
 #[derive(Serialize)]
@@ -87,26 +100,26 @@ fn auth_name(value: crate::inspection::Auth) -> String {
 }
 fn quota_adapter(value: &str) -> api_probe::QuotaAdapter {
     match value {
-        "kimi" => api_probe::QuotaAdapter::Kimi,
-        "deepseek" => api_probe::QuotaAdapter::Deepseek,
-        "moonshot" => api_probe::QuotaAdapter::Moonshot,
-        "zhizz" => api_probe::QuotaAdapter::Zhizz,
-        "sub2api" => api_probe::QuotaAdapter::Sub2api,
-        "minimax" => api_probe::QuotaAdapter::Minimax,
-        "custom" => api_probe::QuotaAdapter::Custom,
+        "quota_kimi" | "kimi" => api_probe::QuotaAdapter::Kimi,
+        "balance_deepseek" | "deepseek" => api_probe::QuotaAdapter::Deepseek,
+        "balance_moonshot" | "moonshot" => api_probe::QuotaAdapter::Moonshot,
+        "balance_zhizz" | "zhizz" => api_probe::QuotaAdapter::Zhizz,
+        "quota_sub2api" | "sub2api" => api_probe::QuotaAdapter::Sub2api,
+        "quota_minimax" | "minimax" => api_probe::QuotaAdapter::Minimax,
+        "balance_custom" | "custom" => api_probe::QuotaAdapter::Custom,
         _ => api_probe::QuotaAdapter::None,
     }
 }
 fn quota_name(value: api_probe::QuotaAdapter) -> String {
     match value {
         api_probe::QuotaAdapter::None => "none",
-        api_probe::QuotaAdapter::Kimi => "kimi",
-        api_probe::QuotaAdapter::Deepseek => "deepseek",
-        api_probe::QuotaAdapter::Moonshot => "moonshot",
-        api_probe::QuotaAdapter::Zhizz => "zhizz",
-        api_probe::QuotaAdapter::Sub2api => "sub2api",
-        api_probe::QuotaAdapter::Minimax => "minimax",
-        api_probe::QuotaAdapter::Custom => "custom",
+        api_probe::QuotaAdapter::Kimi => "quota_kimi",
+        api_probe::QuotaAdapter::Deepseek => "balance_deepseek",
+        api_probe::QuotaAdapter::Moonshot => "balance_moonshot",
+        api_probe::QuotaAdapter::Zhizz => "balance_zhizz",
+        api_probe::QuotaAdapter::Sub2api => "quota_sub2api",
+        api_probe::QuotaAdapter::Minimax => "quota_minimax",
+        api_probe::QuotaAdapter::Custom => "balance_custom",
     }
     .into()
 }
@@ -140,7 +153,17 @@ fn view(account: &data::ApiAccount) -> ApiAccountView {
             })
             .collect(),
         quota_adapter: quota_name(account.quota.adapter),
-        quota: account.quota.clone(),
+        quota: ApiQuotaView {
+            adapter: account.quota.adapter,
+            path: account.quota.path.clone(),
+            auth: account.quota.auth,
+            balance_pointer: account.quota.balance_pointer.clone(),
+            used_pointer: account.quota.used_pointer.clone(),
+            limit_pointer: account.quota.limit_pointer.clone(),
+            remaining_pointer: account.quota.remaining_pointer.clone(),
+            reset_pointer: account.quota.reset_pointer.clone(),
+            unit: account.quota.unit.clone(),
+        },
         console_url: account.console_url.clone(),
     }
 }

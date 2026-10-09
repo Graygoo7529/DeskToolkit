@@ -208,8 +208,6 @@ fieldset h4 { font-size: 12px; font-weight: 500; color: #c5d2eb; margin: 18px 0;
 .api-account-copy strong { font-size: 12px; font-weight: 550; }
 .api-account-copy small { margin-top: 5px; color: #7788a5; font-size: 9px; }
 .api-kind-tag { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 2px; color: var(--provider-color); border: 1px solid color-mix(in srgb, var(--provider-color) 42%, transparent); border-radius: 999px; font-size: 8px; line-height: 1; }
-.api-console-link { display: grid; place-items: center; flex: 0 0 auto; color: #8294b6; opacity: .7; padding: 4px; border-radius: 6px; }
-.api-console-link:hover, .api-console-link:focus-visible { color: var(--provider-color); opacity: 1; background: color-mix(in srgb, var(--provider-color) 12%, transparent); }
 .api-account-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: #58667c; }
 .api-account-dot.ok { background: #70d6b3; box-shadow: 0 0 8px #70d6b344; }
 .api-account-dot.error { background: #ee8b91; box-shadow: 0 0 8px #ee8b9133; }

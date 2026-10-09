@@ -22,6 +22,9 @@ const PALETTE: [&str; 8] = [
 fn version() -> u32 {
     1
 }
+fn api_version() -> u32 {
+    3
+}
 // Serialize storage reads/writes, but release before any network await.
 static STORAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub fn lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
@@ -104,7 +107,7 @@ struct ApiFile {
 impl Default for ApiFile {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: api_version(),
             accounts: vec![],
             kimi_imported: false,
         }
@@ -229,7 +232,7 @@ fn validate_scene(value: &SceneFile) -> Result<(), String> {
 }
 
 fn validate_api_file(value: &ApiFile) -> Result<(), String> {
-    if value.version != 2 {
+    if value.version != api_version() {
         return Err("API 配置版本不受支持，请使用更新版本的 APIConfig".into());
     }
     let mut names = std::collections::HashSet::new();
@@ -386,6 +389,23 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
         api.version = 2;
         api_changed = true;
     }
+    if api.version < api_version() {
+        for account in &mut api.accounts {
+            let address = account
+                .endpoints
+                .iter()
+                .map(|endpoint| endpoint.url.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if account.quota.adapter == crate::api_probe::QuotaAdapter::Minimax
+                && (address.contains("minimaxi.com") || address.contains("minimax"))
+            {
+                account.quota.adapter = crate::api_probe::QuotaAdapter::None;
+            }
+        }
+        api.version = api_version();
+        api_changed = true;
+    }
     if !api.kimi_imported && !kimi.account.key.trim().is_empty() {
         let already = api
             .accounts
@@ -421,33 +441,6 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
         api_changed = true;
     }
     for (index, account) in api.accounts.iter_mut().enumerate() {
-        if account.quota.adapter == crate::api_probe::QuotaAdapter::None {
-            let address = account
-                .endpoints
-                .iter()
-                .map(|endpoint| endpoint.url.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let inferred = if address.contains("api.kimi.com/coding") {
-                crate::api_probe::QuotaAdapter::Kimi
-            } else if address.contains("deepseek.com") {
-                crate::api_probe::QuotaAdapter::Deepseek
-            } else if address.contains("moonshot.cn") {
-                crate::api_probe::QuotaAdapter::Moonshot
-            } else if address.contains("zhizengzeng.com") {
-                crate::api_probe::QuotaAdapter::Zhizz
-            } else if address.contains("tokenadvent.com") || address.contains("/v1/usage") {
-                crate::api_probe::QuotaAdapter::Sub2api
-            } else if address.contains("minimaxi.com") || address.contains("minimax") {
-                crate::api_probe::QuotaAdapter::Minimax
-            } else {
-                crate::api_probe::QuotaAdapter::None
-            };
-            if inferred != crate::api_probe::QuotaAdapter::None {
-                account.quota.adapter = inferred;
-                api_changed = true;
-            }
-        }
         if account.color.len() != 7 || !account.color.starts_with('#') {
             account.color = PALETTE[index % PALETTE.len()].into();
             api_changed = true;
@@ -459,7 +452,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
             }
         }
     }
-    api.version = 2;
+    api.version = api_version();
     validate_api_file(&api)?;
     for (file, scene, changed) in &scenes {
         if *changed {
@@ -639,7 +632,7 @@ pub fn load_api_accounts(app: &AppHandle) -> Result<Vec<ApiAccount>, String> {
 
 pub fn save_api_accounts(app: &AppHandle, accounts: &[ApiAccount]) -> Result<(), String> {
     let mut file = ApiFile {
-        version: 2,
+        version: api_version(),
         accounts: accounts.to_vec(),
         kimi_imported: true,
     };
