@@ -72,7 +72,7 @@ export interface ProbeResult {
     balance: number | null
     unit: string
     membership: string | null
-    windows: { name: string; used: number | null; limit: number | null; remaining: number | null; reset_at: string | null }[]
+    windows: { id?: string; name: string; used: number | null; limit: number | null; remaining: number | null; reset_at: string | null }[]
   } | null
 }
 export interface ProbeSlot {
@@ -98,7 +98,8 @@ export interface ApiAccount {
 
 export type ApiProtocol = 'openai' | 'openai_responses' | 'anthropic' | 'genai' | 'vertexai'
 export interface ApiEndpoint { protocol: ApiProtocol; url: string; auth: Auth }
-export interface ApiQuotaSettings { adapter: string; path: string; auth: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
+export interface ApiQuotaSettings { profile: string; presentation?: 'balance' | 'quota'; adapter?: string; path: string; auth: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
+export interface ApiProbeProfile { id: string; label: string; description: string; kind: string; layout_id: string; layout_label: string; blocks: { component: string; source: string; title: string }[] }
 
 export interface ApiProbeResult {
   model_sets: { protocol: ApiProtocol; result: ProbeResult }[]

@@ -1,0 +1,32 @@
+id = "quota_kimi"
+label = "额度 · Kimi"
+description = "Kimi Coding 的周额度与五小时窗口"
+kind = "subscription"
+layout_id = "subscription_daily_hourly"
+request_method = "GET"
+request_path = "usages"
+request_auth = "bearer"
+membership_pointer = "/user/membership/level"
+
+[[windows]]
+id = "weekly"
+label = "周额度"
+required = true
+used_pointer = "/usage/used"
+limit_pointer = "/usage/limit"
+remaining_pointer = "/usage/remaining"
+reset_pointer = "/usage/resetTime"
+
+[[windows]]
+id = "five_hour"
+label = "5 小时窗口"
+required = true
+array_pointer = "/limits"
+item_pointer = "/detail"
+match_pointer = "/window/duration"
+match_value = "300"
+used_pointer = "/used"
+limit_pointer = "/limit"
+remaining_pointer = "/remaining"
+reset_pointer = "/resetTime"
+

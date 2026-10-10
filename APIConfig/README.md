@@ -25,7 +25,7 @@
 
 ## API 管理
 
-API Probe 用一个账号模型保存直连或订阅类型、多个协议地址、额度适配器和控制台地址，不会把账号应用到 Codex、Claude 或其他 Agent。支持 OpenAI 兼容、OpenAI Responses、Anthropic、GenAI 和 VertexAI；刷新时按协议分别发现模型，详情中的协议胶囊切换模型集，单击模型才发起最小可用性探测。Key 始终只显示掩码。
+API Probe 用一个账号模型保存直连或订阅类型、多个协议地址、额度适配器和控制台地址，不会把账号应用到 Codex、Claude 或其他 Agent。支持 OpenAI 兼容、OpenAI Responses、Anthropic、GenAI 和 VertexAI；刷新时按协议分别发现模型，详情中的协议胶囊切换模型集，单击模型才发起最小可用性探测。列表中的 Key 显示掩码，编辑时可点击显示并修改当前 Key。
 
 账号列表的小圆点表示最近一次刷新状态；控制台地址以外链图标显示，点击后交给系统浏览器打开。可拖动账号排序，列表上方的刷新会并发刷新所有已配置账号。
 
@@ -44,9 +44,10 @@ API Probe 用一个账号模型保存直连或订阅类型、多个协议地址�
 - Codex 应用操作更新 `.codex/config.toml` 中 `[model_providers.OpenAI]` 的 `base_url` 和 `auth.json` 的 `OPENAI_API_KEY`。
 - Claude 应用操作只更新 `settings.json` 中的 `env.ANTHROPIC_BASE_URL` 与 `env.ANTHROPIC_AUTH_TOKEN`，保留其他设置。
 - 默认数据目录为 `%APPDATA%/com.codexconfig.panel/`，右上角“数据目录”可打开或更换本地目录。支持复制当前数据到新目录，或使用已有配置；目标已含配置时禁止复制覆盖。切换立即生效，重启继续沿用。
-- 文件按分页统一：`codex.toml` 和 `claude.toml` 各自保存 `[[homes]]`、`[[providers]]` 以及 Provider 查询设置；`apis.toml` 保存所有 API Probe 账号、协议地址、额度适配器和控制台地址。
+- 文件按分页统一：`codex.toml` 和 `claude.toml` 各自保存 `[[homes]]`、`[[providers]]` 以及 Provider 查询设置；`apis.toml` 保存所有 API Probe 账号、协议地址、额度适配器和控制台地址；`definitions/` 保存额度适配器与展示布局 TOML。
+- `definitions/` 是数据目录中的唯一运行时定义来源。安装包只负责首次初始化空目录，用户新增的自定义定义与现有定义使用相同的目录结构和加载规则。
 - `apis.toml` 中的账号只提供检查与模型管理，不加入 Provider → Home 应用流程。Kimi 与其它 API 使用同一账号编辑器和同一配置文件。
-- 程序目录选择记录在默认目录的 `storage.json`，仅包含数据目录路径。切换目录只复制这三个场景文件，不移动真实的 Codex / Claude Home。
+- 程序目录选择记录在默认目录的 `storage.json`，仅包含数据目录路径。切换目录复制这三个场景文件和完整的 definitions 目录，不移动真实的 Codex / Claude Home。
 - 旧版数据文件首次读取时自动迁移，原文件归档到同目录 `legacy-backup/`。先验证全部数据，再写入新结构；保留密钥、查询设置和列表顺序。迁移完成后不再注册独立 Kimi IPC 或独立编辑流程。
 - 查询设置保存在各 Provider 的 `inspection` 字段，排序保存为 TOML 数组顺序。旧记录会自动使用默认查询设置。Provider 的 `color` 保存固定身份色，改名和排序不改变颜色；连接状态仍由小圆点和详情文本单独表示。
 - Provider 和 API Key 均保存在所选目录的 TOML；界面仅返回掩码。移除 Home 只移除面板记录，不删除真实配置目录。
@@ -63,7 +64,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
-正式版必须使用 `pnpm release` 构建。它会先生成前端资源，再由 Tauri 将资源嵌入原生程序并生成安装包；不要使用单独的 `cargo build --release` 作为发布构建。裸 exe 位于 `src-tauri/target/release/apiconfig.exe`，安装包位于 `src-tauri/target/release/bundle/`。
+正式版使用 `pnpm tauri build` 构建（`pnpm release` 是同一命令的别名）。它会先生成前端资源，再由 Tauri 将资源嵌入原生程序并生成安装包；不要使用单独的 `cargo build --release` 作为发布构建。exe 位于 `src-tauri/target/release/apiconfig.exe`，安装包位于 `src-tauri/target/release/bundle/`。首次使用便携版时保留 exe 旁的 `definitions/` 文件夹；初始化后仅从所选数据目录加载定义。
 
 调试端口为 **1430**。浏览器交互测试使用独立端口 **1431** 和本机 Microsoft Edge，以模拟数据替代 Tauri IPC，不读取实际用户配置或密钥。Rust HTTP 测试仅访问本地临时服务。
 

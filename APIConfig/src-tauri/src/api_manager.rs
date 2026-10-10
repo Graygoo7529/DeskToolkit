@@ -1,5 +1,5 @@
 //! API Probe account management. These accounts are inspection-only and are never applied to an agent home.
-use crate::{api_probe, codex, data};
+use crate::{api_definitions, api_probe, codex, data};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
@@ -27,7 +27,7 @@ pub struct ApiAccountView {
 
 #[derive(Serialize, Clone)]
 pub struct ApiQuotaView {
-    pub adapter: api_probe::QuotaAdapter,
+    pub profile: String,
     pub path: String,
     pub auth: crate::inspection::Auth,
     pub balance_pointer: String,
@@ -54,6 +54,10 @@ pub struct EndpointInput {
 
 #[derive(Deserialize, Default)]
 pub struct QuotaInput {
+    #[serde(default)]
+    pub presentation: String,
+    #[serde(default)]
+    pub profile: String,
     #[serde(default)]
     pub adapter: String,
     #[serde(default)]
@@ -98,32 +102,6 @@ fn auth_name(value: crate::inspection::Auth) -> String {
     }
     .into()
 }
-fn quota_adapter(value: &str) -> api_probe::QuotaAdapter {
-    match value {
-        "quota_kimi" | "kimi" => api_probe::QuotaAdapter::Kimi,
-        "balance_deepseek" | "deepseek" => api_probe::QuotaAdapter::Deepseek,
-        "balance_moonshot" | "moonshot" => api_probe::QuotaAdapter::Moonshot,
-        "balance_zhizz" | "zhizz" => api_probe::QuotaAdapter::Zhizz,
-        "quota_sub2api" | "sub2api" => api_probe::QuotaAdapter::Sub2api,
-        "quota_minimax" | "minimax" => api_probe::QuotaAdapter::Minimax,
-        "balance_custom" | "custom" => api_probe::QuotaAdapter::Custom,
-        _ => api_probe::QuotaAdapter::None,
-    }
-}
-fn quota_name(value: api_probe::QuotaAdapter) -> String {
-    match value {
-        api_probe::QuotaAdapter::None => "none",
-        api_probe::QuotaAdapter::Kimi => "quota_kimi",
-        api_probe::QuotaAdapter::Deepseek => "balance_deepseek",
-        api_probe::QuotaAdapter::Moonshot => "balance_moonshot",
-        api_probe::QuotaAdapter::Zhizz => "balance_zhizz",
-        api_probe::QuotaAdapter::Sub2api => "quota_sub2api",
-        api_probe::QuotaAdapter::Minimax => "quota_minimax",
-        api_probe::QuotaAdapter::Custom => "balance_custom",
-    }
-    .into()
-}
-
 fn view(account: &data::ApiAccount) -> ApiAccountView {
     let first = account
         .endpoints
@@ -152,9 +130,9 @@ fn view(account: &data::ApiAccount) -> ApiAccountView {
                 auth: auth_name(endpoint.auth),
             })
             .collect(),
-        quota_adapter: quota_name(account.quota.adapter),
+        quota_adapter: account.quota.profile.clone(),
         quota: ApiQuotaView {
-            adapter: account.quota.adapter,
+            profile: account.quota.profile.clone(),
             path: account.quota.path.clone(),
             auth: account.quota.auth,
             balance_pointer: account.quota.balance_pointer.clone(),
@@ -209,6 +187,63 @@ pub fn save_api_account(
     if endpoints.is_empty() {
         return Err("至少配置一个接口协议".into());
     }
+    let profile = if quota.profile.trim().is_empty() {
+        quota.adapter.trim().to_string()
+    } else {
+        quota.profile.trim().to_string()
+    };
+    let definitions_dir = data::data_dir(&app)?.join("definitions");
+    let registry = api_definitions::Registry::load(&definitions_dir)?;
+    let selected_definition = registry
+        .adapter(&profile)
+        .ok_or("额度适配器不存在，请刷新后重试")?;
+    let create_definition = selected_definition.kind == "custom";
+    let profile = if create_definition {
+        api_definitions::custom_profile_id(&name)
+    } else {
+        profile
+    };
+    if create_definition {
+        if registry.adapter(&profile).is_some() {
+            return Err("此账号已有同名自定义方案，请选择现有方案，或在数据目录编辑该方案".into());
+        }
+        if !matches!(quota.presentation.as_str(), "balance" | "quota") {
+            return Err("请选择余额或周期额度组件".into());
+        }
+        if quota.presentation == "balance" && quota.balance_pointer.trim().is_empty() {
+            return Err("余额组件需要余额字段路径".into());
+        }
+        if quota.presentation == "quota"
+            && [
+                quota.used_pointer.trim(),
+                quota.limit_pointer.trim(),
+                quota.remaining_pointer.trim(),
+            ]
+            .iter()
+            .all(|value| value.is_empty())
+        {
+            return Err("周期额度至少需要已用、总量或剩余字段".into());
+        }
+        if quota.path.trim().is_empty() {
+            return Err("自定义额度需要查询路径".into());
+        }
+        let pointers = [
+            quota.balance_pointer.trim(),
+            quota.used_pointer.trim(),
+            quota.limit_pointer.trim(),
+            quota.remaining_pointer.trim(),
+            quota.reset_pointer.trim(),
+        ];
+        if pointers[..4].iter().all(|pointer| pointer.is_empty()) {
+            return Err("至少配置一个余额、已用、总量或剩余字段".into());
+        }
+        if pointers
+            .iter()
+            .any(|pointer| !pointer.is_empty() && !pointer.starts_with('/'))
+        {
+            return Err("字段路径需使用 JSON Pointer，例如 /data/balance".into());
+        }
+    }
     let converted: Vec<_> = endpoints
         .iter()
         .map(|input| {
@@ -261,15 +296,8 @@ pub fn save_api_account(
         },
         endpoints: converted,
         quota: api_probe::ApiQuotaSettings {
-            adapter: quota_adapter(&quota.adapter),
-            path: quota.path.trim().into(),
-            auth: auth(&quota.auth, api_probe::Protocol::Openai),
-            balance_pointer: quota.balance_pointer.trim().into(),
-            used_pointer: quota.used_pointer.trim().into(),
-            limit_pointer: quota.limit_pointer.trim().into(),
-            remaining_pointer: quota.remaining_pointer.trim().into(),
-            reset_pointer: quota.reset_pointer.trim().into(),
-            unit: quota.unit.trim().into(),
+            profile: profile.clone(),
+            ..Default::default()
         },
         console_url: console_url.into(),
         key: resolved_key,
@@ -290,6 +318,23 @@ pub fn save_api_account(
             .ok_or("原 API 不存在，请刷新后重试")?;
         account.color = old.color.clone();
         accounts.retain(|a| a.name != original);
+    }
+    api_probe::validate_account(&account)?;
+    if create_definition {
+        api_definitions::write_custom_adapter(
+            &definitions_dir,
+            &profile,
+            &name,
+            &quota.presentation,
+            &quota.path,
+            &quota.auth,
+            &quota.balance_pointer,
+            &quota.used_pointer,
+            &quota.limit_pointer,
+            &quota.remaining_pointer,
+            &quota.reset_pointer,
+            &quota.unit,
+        )?;
     }
     accounts.push(account);
     data::save_api_accounts(&app, &accounts)?;
@@ -340,10 +385,11 @@ pub async fn probe_api_account(app: AppHandle, id: String) -> Result<ApiProbeRes
             result: api_probe::discover(endpoint, &account.key).await,
         });
     }
-    let quota = if account.quota.adapter == api_probe::QuotaAdapter::None {
+    let quota = if account.quota.profile.trim().is_empty() || account.quota.profile == "none" {
         None
     } else {
-        Some(api_probe::quota(&account).await)
+        let registry = api_definitions::load_for_app(&app)?;
+        Some(api_probe::quota(&account, &registry).await)
     };
     Ok(ApiProbeResult { model_sets, quota })
 }

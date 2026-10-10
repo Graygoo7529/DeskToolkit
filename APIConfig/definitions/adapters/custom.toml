@@ -1,0 +1,8 @@
+id = "balance_custom"
+label = "新建查询方案…"
+description = "先选择余额或额度组件，再填写查询字段；保存为数据目录下的 TOML 文件"
+kind = "custom"
+layout_id = "balance"
+request_method = "GET"
+request_path = ""
+request_auth = "bearer"

@@ -69,6 +69,7 @@ pub enum Task {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct QuotaWindow {
     pub name: String,
+    pub id: String,
     pub used: Option<f64>,
     pub limit: Option<f64>,
     pub remaining: Option<f64>,
@@ -190,6 +191,7 @@ fn number(value: Option<&Value>) -> Option<f64> {
 fn window(v: &Value, name: &str) -> Option<QuotaWindow> {
     let result = QuotaWindow {
         name: name.into(),
+        id: name.into(),
         used: number(v.get("used")),
         limit: number(v.get("limit")),
         remaining: number(v.get("remaining")),
@@ -251,6 +253,7 @@ pub fn parse_quota(body: &Value, config: &QuotaSettings) -> Result<(Quota, bool)
             quota.balance = read(&config.balance_pointer);
             let w = QuotaWindow {
                 name: "额度".into(),
+                id: "custom".into(),
                 used: read(&config.used_pointer),
                 limit: read(&config.limit_pointer),
                 remaining: read(&config.remaining_pointer),

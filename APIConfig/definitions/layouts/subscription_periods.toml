@@ -1,0 +1,22 @@
+id = "subscription_periods"
+label = "额度"
+
+[[blocks]]
+component = "membership"
+source = "membership"
+title = "套餐"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.daily"
+title = "日额度"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.weekly"
+title = "周额度"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.monthly"
+title = "月额度"

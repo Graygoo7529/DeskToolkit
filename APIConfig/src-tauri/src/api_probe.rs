@@ -65,14 +65,25 @@ pub enum QuotaAdapter {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ApiQuotaSettings {
+    #[serde(default)]
+    pub profile: String,
+    #[serde(default, skip_serializing)]
     pub adapter: QuotaAdapter,
+    #[serde(skip_serializing)]
     pub path: String,
+    #[serde(skip_serializing)]
     pub auth: inspection::Auth,
+    #[serde(skip_serializing)]
     pub balance_pointer: String,
+    #[serde(skip_serializing)]
     pub used_pointer: String,
+    #[serde(skip_serializing)]
     pub limit_pointer: String,
+    #[serde(skip_serializing)]
     pub remaining_pointer: String,
+    #[serde(skip_serializing)]
     pub reset_pointer: String,
+    #[serde(skip_serializing)]
     pub unit: String,
 }
 
@@ -196,50 +207,13 @@ async fn get_json(
     Ok((body, status))
 }
 
-fn with_auth(
-    mut request: RequestBuilder,
-    key: &str,
-    auth: inspection::Auth,
-) -> RequestBuilder {
+fn with_auth(mut request: RequestBuilder, key: &str, auth: inspection::Auth) -> RequestBuilder {
     request = match auth {
         inspection::Auth::Bearer => request.bearer_auth(key),
         inspection::Auth::XApiKey => request.header("x-api-key", key),
         inspection::Auth::None => request,
     };
     request
-}
-
-async fn post_json(
-    url: Url,
-    key: &str,
-    auth: inspection::Auth,
-) -> Result<(Value, u16), String> {
-    let response = with_auth(HTTP.post(url), key, auth)
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .map_err(|_| "请求失败，请检查网络、地址和认证设置")?;
-    let status = response.status().as_u16();
-    if !response.status().is_success() {
-        return Err(format!(
-            "HTTP {status} · {}",
-            if matches!(status, 401 | 403) {
-                "认证失败或无权限"
-            } else if status == 404 {
-                "接口路径不存在"
-            } else if status == 429 {
-                "请求限流"
-            } else {
-                "请求被拒绝"
-            }
-        ));
-    }
-    let body = response
-        .json::<Value>()
-        .await
-        .map_err(|_| "接口未返回合法 JSON")?;
-    Ok((body, status))
 }
 
 fn generic_models(body: &Value) -> Vec<inspection::Model> {
@@ -357,303 +331,223 @@ fn json_text(value: Option<&Value>) -> Option<String> {
     })
 }
 
-fn sub2api_window(
-    quota: &mut inspection::Quota,
-    name: &str,
-    value: &Value,
-    used_key: &str,
-    limit_key: &str,
-    remaining_key: &str,
-    reset_key: &str,
-) {
-    let used = json_number(value.get(used_key));
-    let limit = json_number(value.get(limit_key));
-    let remaining = json_number(value.get(remaining_key)).or_else(|| match (used, limit) {
-        (Some(used), Some(limit)) => Some(limit - used),
-        _ => None,
-    });
-    if limit.is_some_and(|limit| limit <= 0.0) && remaining.is_some_and(|remaining| remaining <= 0.0) {
-        return;
+fn pointer<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.trim().is_empty() {
+        Some(value)
+    } else {
+        value.pointer(path)
     }
-    if used.is_none() && limit.is_none() && remaining.is_none() {
-        return;
-    }
-    quota.windows.push(inspection::QuotaWindow {
-        name: name.into(),
-        used,
-        limit,
-        remaining,
-        reset_at: json_text(value.get(reset_key)),
-    });
 }
 
-fn parse_sub2api(body: &Value) -> Result<(inspection::Quota, bool), String> {
-    let mut quota = inspection::Quota {
-        unit: body
-            .get("unit")
-            .and_then(Value::as_str)
-            .unwrap_or("USD")
-            .into(),
-        membership: body
-            .get("planName")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        ..Default::default()
+fn query_url(base: &str, path: &str) -> Result<Url, String> {
+    let base =
+        Url::parse(&format!("{}/", base.trim_end_matches('/'))).map_err(|_| "额度查询地址无效")?;
+    if !matches!(base.scheme(), "http" | "https")
+        || base.host_str().is_none()
+        || !base.username().is_empty()
+        || base.password().is_some()
+        || base.query().is_some()
+        || base.fragment().is_some()
+    {
+        return Err("额度查询地址无效".into());
+    }
+    if path.trim().is_empty() {
+        return Err("额度查询路径不能为空".into());
+    }
+    if path.contains("://") || path.starts_with("//") || path.contains('\\') {
+        return Err("额度查询路径必须与账号地址同源".into());
+    }
+    let url = base.join(path).map_err(|_| "额度查询路径无效")?;
+    if url.origin() != base.origin() || url.fragment().is_some() {
+        return Err("额度查询路径必须与账号地址同源".into());
+    }
+    Ok(url)
+}
+
+async fn request_json(
+    url: Url,
+    key: &str,
+    method: &str,
+    auth: inspection::Auth,
+) -> Result<(Value, u16), String> {
+    let request = match method.to_ascii_uppercase().as_str() {
+        "POST" => HTTP
+            .post(url)
+            .header("content-type", "application/json")
+            .json(&serde_json::json!({})),
+        _ => HTTP.get(url),
     };
-    if let Some(subscription) = body.get("subscription") {
-        sub2api_window(
-            &mut quota,
-            "日额度",
-            subscription,
-            "daily_usage_usd",
-            "daily_limit_usd",
-            "daily_remaining_usd",
-            "daily_window_start",
-        );
-        sub2api_window(
-            &mut quota,
-            "周额度",
-            subscription,
-            "weekly_usage_usd",
-            "weekly_limit_usd",
-            "weekly_remaining_usd",
-            "weekly_window_start",
-        );
-        sub2api_window(
-            &mut quota,
-            "月额度",
-            subscription,
-            "monthly_usage_usd",
-            "monthly_limit_usd",
-            "monthly_remaining_usd",
-            "monthly_window_start",
-        );
-        if let Some(window) = quota.windows.iter_mut().find(|w| w.reset_at.is_none()) {
-            window.reset_at = json_text(subscription.get("expires_at"));
-        }
+    let response = with_auth(request, key, auth)
+        .send()
+        .await
+        .map_err(|_| "请求失败，请检查网络、地址和认证设置")?;
+    let status = response.status().as_u16();
+    if !response.status().is_success() {
+        return Err(format!(
+            "HTTP {status} · {}",
+            if matches!(status, 401 | 403) {
+                "认证失败或无权限"
+            } else if status == 404 {
+                "接口路径不存在"
+            } else if status == 429 {
+                "请求限流"
+            } else {
+                "请求被拒绝"
+            }
+        ));
     }
-    if let Some(limited) = body.get("quota") {
-        sub2api_window(
-            &mut quota,
-            "API Key 配额",
-            limited,
-            "used",
-            "limit",
-            "remaining",
-            "reset_at",
-        );
-    }
-    if let Some(rate_limits) = body.get("rate_limits").and_then(Value::as_array) {
-        for item in rate_limits {
-            let name = item
-                .get("window")
-                .and_then(Value::as_str)
-                .unwrap_or("速率窗口");
-            sub2api_window(
-                &mut quota,
-                name,
-                item,
-                "used",
-                "limit",
-                "remaining",
-                "reset_at",
-            );
-        }
-    }
-    quota.balance = json_number(body.get("balance"));
-    if quota.windows.is_empty() && quota.balance.is_none() {
-        quota.balance = json_number(body.get("remaining"));
-    }
-    let recognized = body.get("isValid").is_some()
-        || body.get("mode").is_some()
-        || body.get("subscription").is_some()
-        || body.get("quota").is_some()
-        || body.get("rate_limits").is_some();
-    if !recognized || (quota.balance.is_none() && quota.windows.is_empty()) {
-        return Err("响应中没有可识别的 Sub2API 额度数值".into());
-    }
-    Ok((quota, false))
+    let bytes = response.bytes().await.map_err(|_| "无法读取接口响应")?;
+    let body = parse_json_payload(&bytes)?;
+    Ok((body, status))
 }
 
-fn parse_minimax(body: &Value) -> Result<inspection::Quota, String> {
-    let base = body.get("base_resp").unwrap_or(body);
-    if json_number(base.get("status_code")).is_some_and(|code| code != 0.0) {
-        return Err(
-            base.get("status_msg")
-                .and_then(Value::as_str)
-                .unwrap_or("MiniMax 额度接口返回错误")
-                .into(),
-        );
+fn parse_json_payload(bytes: &[u8]) -> Result<Value, String> {
+    let text = String::from_utf8_lossy(bytes)
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .to_string();
+    if let Ok(value) = serde_json::from_str::<Value>(&text) {
+        return Ok(value);
     }
-    let remains = body
-        .get("model_remains")
-        .or_else(|| body.get("data").and_then(|v| v.get("model_remains")))
-        .and_then(Value::as_array)
-        .ok_or("响应中没有 MiniMax Token Plan 额度")?;
-    let item = remains
-        .iter()
-        .find(|item| item.get("model_name").and_then(Value::as_str) == Some("general"))
-        .or_else(|| {
-            remains.iter().min_by(|left, right| {
-                json_number(left.get("current_interval_remaining_percent"))
-                    .unwrap_or(101.0)
-                    .partial_cmp(
-                        &json_number(right.get("current_interval_remaining_percent"))
-                            .unwrap_or(101.0),
-                    )
-                    .unwrap_or(std::cmp::Ordering::Equal)
+    if text.starts_with('<') {
+        return Err("额度接口返回了网页，请检查查询路径".into());
+    }
+    Err("额度接口未返回合法 JSON，请检查查询路径".into())
+}
+
+fn matches_definition(value: &Value, path: &str, expected: &str) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    let actual = json_text(pointer(value, path));
+    actual.as_deref() == Some(expected)
+}
+
+fn definition_number(value: &Value, path: &str) -> Option<f64> {
+    json_number(pointer(value, path))
+}
+
+fn parse_definition(
+    body: &Value,
+    definition: &crate::api_definitions::AdapterDefinition,
+) -> (inspection::Quota, bool) {
+    let read_number = |value: &Value, path: &str| {
+        if path.is_empty() {
+            None
+        } else {
+            definition_number(value, path)
+        }
+    };
+    let read_text = |value: &Value, path: &str| {
+        if path.is_empty() {
+            None
+        } else {
+            json_text(pointer(value, path))
+        }
+    };
+    let selected = if definition.array_pointer.is_empty() {
+        Some(body)
+    } else {
+        pointer(body, &definition.array_pointer)
+            .and_then(Value::as_array)
+            .and_then(|items| {
+                items.iter().find(|item| {
+                    matches_definition(item, &definition.match_pointer, &definition.match_value)
+                })
             })
-        })
-        .ok_or("响应中没有 MiniMax Token Plan 额度")?;
+    };
     let mut quota = inspection::Quota {
-        unit: "%".into(),
-        membership: item
-            .get("model_name")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        balance: read_number(body, &definition.balance_pointer)
+            .or_else(|| read_number(body, &definition.fallback_balance_pointer)),
+        unit: read_text(body, &definition.unit_pointer)
+            .unwrap_or_else(|| definition.default_unit.clone()),
+        membership: read_text(body, &definition.membership_pointer),
         ..Default::default()
     };
-    for (name, remaining_key, reset_key) in [
-        ("5 小时窗口", "current_interval_remaining_percent", "end_time"),
-        ("周额度", "current_weekly_remaining_percent", "weekly_end_time"),
-    ] {
-        if let Some(remaining) = json_number(item.get(remaining_key)) {
-            quota.windows.push(inspection::QuotaWindow {
-                name: name.into(),
-                used: Some((100.0 - remaining).max(0.0)),
-                limit: Some(100.0),
-                remaining: Some(remaining),
-                reset_at: json_text(item.get(reset_key)),
-            });
+    let mut partial = !definition.balance_pointer.is_empty() && quota.balance.is_none();
+    // One declared mapping produces one stable output slot. Missing response
+    // data never adds, removes, renames or changes a presentation component.
+    for window in &definition.windows {
+        let source = if window.array_pointer.is_empty() {
+            selected
+        } else {
+            pointer(body, &window.array_pointer)
+                .and_then(Value::as_array)
+                .and_then(|items| {
+                    items.iter().find(|item| {
+                        matches_definition(item, &window.match_pointer, &window.match_value)
+                    })
+                })
+        };
+        let item = source
+            .and_then(|value| pointer(value, &window.scope_pointer))
+            .and_then(|value| pointer(value, &window.item_pointer));
+        let read = |path: &str| item.and_then(|value| read_number(value, path));
+        let mut used = read(&window.used_pointer);
+        let mut limit = read(&window.limit_pointer).or(window.limit_value);
+        let mut remaining = read(&window.remaining_pointer);
+        if limit.is_none() {
+            limit = used
+                .zip(remaining)
+                .map(|(used, remaining)| used + remaining);
         }
+        if remaining.is_none() {
+            remaining = limit.zip(used).map(|(limit, used)| limit - used);
+        }
+        if used.is_none() {
+            used = limit
+                .zip(remaining)
+                .map(|(limit, remaining)| limit - remaining);
+        }
+        if window.required && (used.is_none() || limit.is_none() || remaining.is_none()) {
+            partial = true;
+        }
+        quota.windows.push(inspection::QuotaWindow {
+            id: window.id.clone(),
+            name: window.label.clone(),
+            used,
+            limit,
+            remaining,
+            reset_at: item.and_then(|value| read_text(value, &window.reset_pointer)),
+        });
     }
-    if quota.windows.is_empty() {
-        return Err("响应中没有 MiniMax Token Plan 窗口".into());
-    }
-    Ok(quota)
+    let has_values = quota.balance.is_some()
+        || quota
+            .windows
+            .iter()
+            .any(|window| window.used.is_some() || window.remaining.is_some());
+    (quota, partial || !has_values)
 }
-pub async fn quota(account: &data::ApiAccount) -> inspection::ProbeResult {
+
+pub async fn quota(
+    account: &data::ApiAccount,
+    registry: &crate::api_definitions::Registry,
+) -> inspection::ProbeResult {
     let start = Instant::now();
-    let endpoint_config = account.endpoints.first();
-    let Some(ep) = endpoint_config else {
+    let Some(ep) = account.endpoints.first() else {
         return result("skipped", "未配置查询接口", None, start);
     };
     let q = &account.quota;
-    if q.adapter == QuotaAdapter::None {
+    let profile = q.profile.trim();
+    if profile.is_empty() || profile == "none" {
         return result("skipped", "未配置额度查询适配器", None, start);
     }
-    let query_key = account.key.as_str();
-    let base_url = ep.url.as_str();
-    let path = if q.path.trim().is_empty() {
-        match q.adapter {
-            QuotaAdapter::Deepseek => "/user/balance",
-            QuotaAdapter::Moonshot => "/users/me/balance",
-            QuotaAdapter::Zhizz => "/dashboard/billing/credit_grants",
-            QuotaAdapter::Sub2api => "/usage",
-            QuotaAdapter::Minimax => "/token_plan/remains",
-            _ => "usages",
-        }
-    } else {
-        q.path.as_str()
+    let Some(definition) = registry.adapter(profile) else {
+        return result("error", "额度适配器定义不存在", None, start);
     };
-    let url = if matches!(q.adapter, QuotaAdapter::Zhizz | QuotaAdapter::Sub2api | QuotaAdapter::Minimax) {
-        endpoint(base_url, path.trim_start_matches('/'))
-    } else {
-        let base = base_url.trim_end_matches('/');
-        Url::parse(&format!(
-            "{base}{}",
-            if path.starts_with('/') {
-                path.to_string()
-            } else {
-                format!("/{path}")
-            }
-        ))
-        .map_err(|_| "额度查询地址无效".into())
+    let path = definition.request_path.clone();
+    let auth = crate::api_definitions::auth(&definition.request_auth);
+    let url = match query_url(&ep.url, &path) {
+        Ok(url) => url,
+        Err(error) => return result("error", error, None, start),
     };
-    let Ok(url) = url else {
-        return result("error", "额度查询地址无效", None, start);
-    };
-    let response = if q.adapter == QuotaAdapter::Zhizz {
-        post_json(url, query_key, q.auth).await
-    } else {
-        get_json(url, query_key, q.auth, None).await
-    };
-    match response {
+    match request_json(url, &account.key, &definition.request_method, auth).await {
         Ok((body, status)) => {
-            let mut quota = inspection::Quota {
-                unit: q.unit.clone(),
-                ..Default::default()
-            };
-            let mut partial = false;
-            match q.adapter {
-                QuotaAdapter::Deepseek => {
-                    let item = body.pointer("/balance_infos/0");
-                    quota.balance = json_number(item.and_then(|v| v.get("total_balance")));
-                    quota.unit = item
-                        .and_then(|v| v.get("currency"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("CNY")
-                        .into();
-                }
-                QuotaAdapter::Moonshot => {
-                    quota.balance = json_number(body.pointer("/data/available_balance"));
-                    quota.unit = "CNY".into();
-                }
-                QuotaAdapter::Zhizz => {
-                    quota.balance = json_number(body.pointer("/grants/available_amount"));
-                    quota.unit = "credits".into();
-                }
-                QuotaAdapter::Sub2api => match parse_sub2api(&body) {
-                    Ok((parsed, p)) => {
-                        quota = parsed;
-                        partial = p;
-                    }
-                    Err(error) => {
-                        return result("error", error, Some(status), start);
-                    }
-                },
-                QuotaAdapter::Minimax => match parse_minimax(&body) {
-                    Ok(parsed) => quota = parsed,
-                    Err(error) => return result("error", error, Some(status), start),
-                },
-                QuotaAdapter::Kimi => {
-                    if let Ok((parsed, p)) = inspection::parse_quota(
-                        &body,
-                        &inspection::QuotaSettings {
-                            adapter: inspection::Adapter::Kimi,
-                            ..Default::default()
-                        },
-                    ) {
-                        quota = parsed;
-                        partial = p;
-                    } else {
-                        return result(
-                            "error",
-                            "响应中没有可识别的 Kimi 额度",
-                            Some(status),
-                            start,
-                        );
-                    }
-                }
-                QuotaAdapter::Custom => {
-                    quota.balance = json_number(body.pointer(&q.balance_pointer));
-                    quota.unit = q.unit.clone();
-                    if quota.balance.is_none() {
-                        partial = true;
-                    }
-                }
-                QuotaAdapter::None => unreachable!(),
-            }
+            let (quota, partial) = parse_definition(&body, &definition);
             let mut r = result(
+                if partial { "partial" } else { "ok" },
                 if partial {
-                    "partial"
-                } else if quota.balance.is_some() || !quota.windows.is_empty() {
-                    "ok"
-                } else {
-                    "error"
-                },
-                if partial {
-                    "部分额度字段缺失，已展示可用数据"
+                    "部分额度字段缺失，未返回的字段显示为 —"
                 } else {
                     "额度已更新"
                 },
@@ -754,59 +648,38 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn sub2api_parses_subscription_windows_and_skips_unlimited_windows() {
+    fn subscription_definition_ignores_balance_and_undeclared_periods() {
         let body = json!({
-            "mode": "unrestricted",
             "planName": "Claude Lite",
             "unit": "USD",
             "remaining": 49.9,
+            "balance": 999,
+            "mode": "unrestricted",
             "subscription": {
                 "daily_usage_usd": 0.1,
                 "daily_limit_usd": 50,
-                "weekly_usage_usd": 1,
                 "weekly_limit_usd": 0,
-                "expires_at": "2026-12-31T00:00:00Z"
+                "weekly_usage_usd": 26.9,
+                "monthly_limit_usd": 0,
+                "monthly_usage_usd": 239.7
             }
         });
-        let (quota, partial) = parse_sub2api(&body).expect("sub2api response should parse");
+        let definition = crate::api_definitions::source_registry_for_tests()
+            .adapter("quota_sub2api")
+            .unwrap();
+        let (quota, partial) = parse_definition(&body, &definition);
         assert!(!partial);
         assert_eq!(quota.membership.as_deref(), Some("Claude Lite"));
-        assert_eq!(quota.windows.len(), 1);
         assert_eq!(quota.windows[0].remaining, Some(49.9));
-    }
-
-    #[test]
-    fn sub2api_parses_wallet_balance_mode() {
-        let body = json!({
-            "isValid": true,
-            "mode": "balance",
-            "remaining": 12.5,
-            "unit": "USD",
-            "usage": { "total": { "cost": 2.0 } }
-        });
-        let (quota, partial) = parse_sub2api(&body).expect("sub2api balance response should parse");
-        assert!(!partial);
-        assert_eq!(quota.balance, Some(12.5));
-        assert!(quota.windows.is_empty());
-    }
-
-    #[test]
-    fn sub2api_parses_api_key_quota_mode() {
-        let body = json!({
-            "isValid": true,
-            "quota": { "used": 3, "limit": 10, "remaining": 7, "reset_at": "2026-10-10T00:00:00Z" }
-        });
-        let (quota, partial) = parse_sub2api(&body).expect("sub2api quota response should parse");
-        assert!(!partial);
+        assert_eq!(quota.windows[0].id, "daily");
+        assert_eq!(quota.balance, None);
         assert_eq!(quota.windows.len(), 1);
-        assert_eq!(quota.windows[0].used, Some(3.0));
-        assert_eq!(quota.windows[0].remaining, Some(7.0));
+        assert_eq!(quota.windows[0].reset_at, None);
     }
 
     #[test]
-    fn minimax_parses_interval_and_weekly_percentages() {
+    fn toml_minimax_definition_selects_general_model() {
         let body = json!({
-            "base_resp": { "status_code": 0 },
             "model_remains": [{
                 "model_name": "general",
                 "current_interval_remaining_percent": 72,
@@ -815,9 +688,54 @@ mod tests {
                 "weekly_end_time": "2026-10-12T00:00:00Z"
             }]
         });
-        let quota = parse_minimax(&body).expect("minimax response should parse");
+        let definition = crate::api_definitions::source_registry_for_tests()
+            .adapter("quota_minimax")
+            .unwrap();
+        let (quota, _) = parse_definition(&body, &definition);
         assert_eq!(quota.windows.len(), 2);
         assert_eq!(quota.windows[0].remaining, Some(72.0));
-        assert_eq!(quota.windows[1].remaining, Some(58.0));
+    }
+
+    #[test]
+    fn toml_kimi_definition_marks_missing_required_window_partial() {
+        let body = json!({
+            "usage": { "used": 2, "limit": 10, "remaining": 8 }
+        });
+        let definition = crate::api_definitions::source_registry_for_tests()
+            .adapter("quota_kimi")
+            .unwrap();
+        let (quota, partial) = parse_definition(&body, &definition);
+        assert!(partial);
+        assert_eq!(quota.windows.len(), 2);
+        assert_eq!(quota.windows[1].remaining, None);
+    }
+
+    #[test]
+    fn quota_json_accepts_bom_and_reports_webpage() {
+        assert_eq!(
+            parse_json_payload("\u{feff}{\"balance\":12}".as_bytes()).unwrap()["balance"],
+            12
+        );
+        assert!(parse_json_payload(b"<html>login</html>")
+            .unwrap_err()
+            .contains("网页"));
+    }
+
+    #[test]
+    fn sub2api_path_is_rooted_at_v1() {
+        assert_eq!(
+            query_url("https://relay.example/anthropic", "/v1/usage")
+                .unwrap()
+                .as_str(),
+            "https://relay.example/v1/usage"
+        );
+        assert!(query_url("https://relay.example/v1", "//other.example/usage").is_err());
+        assert!(query_url("https://relay.example/v1", "https://other.example/usage").is_err());
+        assert_eq!(
+            query_url("https://relay.example/v1", "usage")
+                .unwrap()
+                .as_str(),
+            "https://relay.example/v1/usage"
+        );
     }
 }

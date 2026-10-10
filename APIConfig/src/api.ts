@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { State, Scene, ProbeTask, ProbeResult, InspectionSettings, ApiAccount, ApiProbeResult, ApiEndpoint, ApiQuotaSettings } from './types'
+import type { State, Scene, ProbeTask, ProbeResult, InspectionSettings, ApiAccount, ApiProbeResult, ApiEndpoint, ApiQuotaSettings, ApiProbeProfile } from './types'
 
 export const getState = () => invoke<State>('get_state')
 
@@ -49,6 +49,7 @@ export const saveInspection = (scene: Scene, name: string, settings: InspectionS
 export const reorderItems = (scene: Scene, kind: 'providers' | 'homes', names: string[]) =>
   invoke<State>('reorder_items', { scene, kind, names })
 
+export const getApiProbeProfiles = () => invoke<ApiProbeProfile[]>('get_api_probe_profiles')
 export const getApiAccounts = () => invoke<ApiAccount[]>('get_api_accounts')
 export const getApiAccountKey = (id: string) => invoke<string>('get_api_account_key', { id })
 export const openExternalUrl = (url: string) => invoke<void>('open_external_url', { url })

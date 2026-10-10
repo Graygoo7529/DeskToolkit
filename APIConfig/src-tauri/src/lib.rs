@@ -1,3 +1,4 @@
+mod api_definitions;
 mod api_manager;
 mod api_probe;
 mod claude;
@@ -591,6 +592,7 @@ pub fn run() {
             inspect_provider,
             save_inspection,
             reorder_items,
+            api_definitions::get_api_probe_profiles,
             api_manager::get_api_accounts,
             api_manager::get_api_account_key,
             api_manager::save_api_account,

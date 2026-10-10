@@ -1,0 +1,17 @@
+id = "subscription_daily_hourly"
+label = "额度"
+
+[[blocks]]
+component = "membership"
+source = "membership"
+title = "套餐"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.weekly"
+title = "周额度"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.five_hour"
+title = "5 小时窗口"

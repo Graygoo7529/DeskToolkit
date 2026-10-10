@@ -1,0 +1,40 @@
+id = "quota_sub2api_periods"
+label = "额度 · Sub2API（日 / 周 / 月）"
+description = "固定显示日、周、月额度，复用账号的接口地址与 Key"
+kind = "subscription"
+layout_id = "subscription_periods"
+request_method = "GET"
+request_path = "/v1/usage"
+request_auth = "bearer"
+membership_pointer = "/planName"
+default_unit = "USD"
+
+[[windows]]
+id = "daily"
+label = "日额度"
+required = true
+scope_pointer = "/subscription"
+used_pointer = "/daily_usage_usd"
+limit_pointer = "/daily_limit_usd"
+remaining_pointer = "/daily_remaining_usd"
+reset_pointer = "/daily_reset_at"
+
+[[windows]]
+id = "weekly"
+label = "周额度"
+required = true
+scope_pointer = "/subscription"
+used_pointer = "/weekly_usage_usd"
+limit_pointer = "/weekly_limit_usd"
+remaining_pointer = "/weekly_remaining_usd"
+reset_pointer = "/weekly_reset_at"
+
+[[windows]]
+id = "monthly"
+label = "月额度"
+required = true
+scope_pointer = "/subscription"
+used_pointer = "/monthly_usage_usd"
+limit_pointer = "/monthly_limit_usd"
+remaining_pointer = "/monthly_remaining_usd"
+reset_pointer = "/monthly_reset_at"

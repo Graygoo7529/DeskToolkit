@@ -1,0 +1,7 @@
+id = "balance"
+label = "余额"
+
+[[blocks]]
+component = "balance_card"
+source = "balance"
+title = "账户余额"

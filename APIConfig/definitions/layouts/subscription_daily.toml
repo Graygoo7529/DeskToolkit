@@ -1,0 +1,12 @@
+id = "subscription_daily"
+label = "额度"
+
+[[blocks]]
+component = "membership"
+source = "membership"
+title = "套餐"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.daily"
+title = "日额度"

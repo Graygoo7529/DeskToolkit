@@ -1,0 +1,32 @@
+id = "quota_minimax"
+label = "额度 · MiniMax Token Plan"
+description = "MiniMax Token Plan 的五小时与周窗口"
+kind = "subscription"
+layout_id = "subscription_daily_hourly"
+request_method = "GET"
+request_path = "token_plan/remains"
+request_auth = "bearer"
+array_pointer = "/model_remains"
+match_pointer = "/model_name"
+match_value = "general"
+default_unit = "%"
+
+[[windows]]
+id = "five_hour"
+label = "5 小时窗口"
+required = true
+used_pointer = "/current_interval_used_percent"
+limit_value = 100
+remaining_pointer = "/current_interval_remaining_percent"
+reset_pointer = "/end_time"
+
+[[windows]]
+id = "weekly"
+label = "周额度"
+required = true
+scope_pointer = ""
+used_pointer = "/current_weekly_used_percent"
+limit_value = 100
+remaining_pointer = "/current_weekly_remaining_percent"
+reset_pointer = "/weekly_end_time"
+

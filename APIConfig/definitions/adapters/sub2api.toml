@@ -1,0 +1,20 @@
+id = "quota_sub2api"
+label = "额度 · Sub2API（日）"
+description = "固定显示日额度，复用账号的接口地址与 Key"
+kind = "subscription"
+layout_id = "subscription_daily"
+request_method = "GET"
+request_path = "/v1/usage"
+request_auth = "bearer"
+membership_pointer = "/planName"
+default_unit = "USD"
+
+[[windows]]
+id = "daily"
+label = "日额度"
+required = true
+scope_pointer = "/subscription"
+used_pointer = "/daily_usage_usd"
+limit_pointer = "/daily_limit_usd"
+remaining_pointer = "/daily_remaining_usd"
+reset_pointer = "/daily_reset_at"

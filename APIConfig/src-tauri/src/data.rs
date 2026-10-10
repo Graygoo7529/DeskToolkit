@@ -23,7 +23,7 @@ fn version() -> u32 {
     1
 }
 fn api_version() -> u32 {
-    3
+    5
 }
 // Serialize storage reads/writes, but release before any network await.
 static STORAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -391,6 +391,19 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
     }
     if api.version < api_version() {
         for account in &mut api.accounts {
+            if account.quota.profile.trim().is_empty() {
+                account.quota.profile = match account.quota.adapter {
+                    crate::api_probe::QuotaAdapter::Kimi => "quota_kimi",
+                    crate::api_probe::QuotaAdapter::Deepseek => "balance_deepseek",
+                    crate::api_probe::QuotaAdapter::Moonshot => "balance_moonshot",
+                    crate::api_probe::QuotaAdapter::Zhizz => "balance_zhizz",
+                    crate::api_probe::QuotaAdapter::Sub2api => "quota_sub2api",
+                    crate::api_probe::QuotaAdapter::Minimax => "quota_minimax",
+                    crate::api_probe::QuotaAdapter::Custom => "balance_custom",
+                    crate::api_probe::QuotaAdapter::None => "none",
+                }
+                .into();
+            }
             let address = account
                 .endpoints
                 .iter()
@@ -401,6 +414,38 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
                 && (address.contains("minimaxi.com") || address.contains("minimax"))
             {
                 account.quota.adapter = crate::api_probe::QuotaAdapter::None;
+                account.quota.profile = "none".into();
+            }
+            if account.quota.profile == "quota_sub2api" && account.kind == AccountKind::Direct {
+                account.quota.profile = "balance_sub2api".into();
+            }
+            if account.quota.profile == "balance_custom" {
+                let q = &account.quota;
+                let id = crate::api_definitions::custom_profile_id(&account.name);
+                let auth = match q.auth {
+                    crate::inspection::Auth::Bearer => "bearer",
+                    crate::inspection::Auth::XApiKey => "x_api_key",
+                    crate::inspection::Auth::None => "none",
+                };
+                crate::api_definitions::write_custom_adapter(
+                    &dir.join("definitions"),
+                    &id,
+                    &account.name,
+                    if q.balance_pointer.is_empty() {
+                        "quota"
+                    } else {
+                        "balance"
+                    },
+                    &q.path,
+                    auth,
+                    &q.balance_pointer,
+                    &q.used_pointer,
+                    &q.limit_pointer,
+                    &q.remaining_pointer,
+                    &q.reset_pointer,
+                    &q.unit,
+                )?;
+                account.quota.profile = id;
             }
         }
         api.version = api_version();
@@ -426,6 +471,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
                     &kimi.account.url,
                 )],
                 quota: crate::api_probe::ApiQuotaSettings {
+                    profile: "quota_kimi".into(),
                     adapter: crate::api_probe::QuotaAdapter::Kimi,
                     ..Default::default()
                 },
@@ -491,8 +537,51 @@ fn resolve_dir(default: &Path) -> Result<PathBuf, String> {
 }
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = resolve_dir(&default_dir(app)?)?;
+    ensure_probe_definitions(app, &dir)?;
     prepare_dir(&dir)?;
     Ok(dir)
+}
+
+fn copy_missing_tree(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir_all(target).map_err(|_| "无法创建 definitions 配置目录")?;
+    for entry in fs::read_dir(source).map_err(|_| "无法读取 definitions 资源")? {
+        let entry = entry.map_err(|_| "无法读取 definitions 资源")?;
+        let from = entry.path();
+        let to = target.join(entry.file_name());
+        if from.is_dir() {
+            copy_missing_tree(&from, &to)?;
+        } else if !to.exists() {
+            fs::copy(&from, &to).map_err(|_| format!("无法复制定义文件 {}", to.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Seed the selected data directory from packaged resources once. Files are
+/// never overwritten, so edits and custom definitions remain user-owned.
+fn ensure_probe_definitions(app: &AppHandle, dir: &Path) -> Result<(), String> {
+    let target = dir.join("definitions");
+    if target.exists() {
+        return Ok(());
+    }
+    let packaged = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|path| path.join("definitions"));
+    let source = packaged.filter(|path| path.is_dir());
+    #[cfg(debug_assertions)]
+    let source =
+        source.or_else(|| Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions")));
+    let source = source.ok_or("找不到额度定义资源，请保留 exe 旁的 definitions 目录或重新安装")?;
+    if !source.is_dir() {
+        return Err("找不到额度定义资源，请检查安装包是否完整".into());
+    }
+    fs::create_dir_all(dir).map_err(|_| "无法创建数据目录")?;
+    let staged = tempfile::tempdir_in(dir).map_err(|_| "无法初始化 definitions 目录")?;
+    copy_missing_tree(&source, &staged.path().join("definitions"))?;
+    fs::rename(staged.path().join("definitions"), &target)
+        .map_err(|_| "无法保存 definitions 目录".to_string())
 }
 #[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -519,10 +608,11 @@ fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Resul
     }
     match mode {
         DirectoryMode::Copy => {
-            if FILES
-                .iter()
-                .chain(LEGACY.iter())
-                .any(|f| target.join(f).exists())
+            if target.join("definitions").exists()
+                || FILES
+                    .iter()
+                    .chain(LEGACY.iter())
+                    .any(|f| target.join(f).exists())
             {
                 return Err("目标目录已有配置；请选择“使用已有配置”，或选择新的空目录".into());
             }
@@ -532,6 +622,12 @@ fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Resul
             for file in FILES {
                 fs::copy(source.join(file), staged.path().join(file))
                     .map_err(|_| "复制配置失败，当前目录未改变")?;
+            }
+            if source.join("definitions").is_dir() {
+                copy_missing_tree(
+                    &source.join("definitions"),
+                    &staged.path().join("definitions"),
+                )?;
             }
             let mut copied = Vec::new();
             for file in FILES {
@@ -554,6 +650,19 @@ fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Resul
                     return Err(error);
                 }
                 copied.push(target.join(file));
+            }
+            if staged.path().join("definitions").exists() {
+                if fs::rename(
+                    staged.path().join("definitions"),
+                    target.join("definitions"),
+                )
+                .is_err()
+                {
+                    for created in copied {
+                        let _ = fs::remove_file(created);
+                    }
+                    return Err("复制额度定义失败，当前数据目录未改变".into());
+                }
             }
         }
         DirectoryMode::Existing => {
@@ -686,7 +795,7 @@ mod storage_tests {
         assert_eq!(claude.homes[0].location, "D:\\ClaudeData");
         let apis: ApiFile = read(&dir.path().join(FILES[2])).unwrap();
         assert_eq!(apis.accounts[0].key, "fixture-kimi");
-        assert!(apis.accounts[0].quota.adapter == crate::api_probe::QuotaAdapter::Kimi);
+        assert_eq!(apis.accounts[0].quota.profile, "quota_kimi");
         assert!(!dir.path().join(KIMI_LEGACY).exists());
         for (file, bytes) in LEGACY.iter().zip(old) {
             assert!(!dir.path().join(file).exists());
@@ -722,7 +831,14 @@ mod storage_tests {
         fs::create_dir(&source).unwrap();
         legacy(&source);
         prepare_dir(&source).unwrap();
+        let definition = Path::new("definitions/adapters/my-provider.toml");
+        fs::create_dir_all(source.join("definitions/adapters")).unwrap();
+        fs::write(source.join(definition), "# user-owned definition").unwrap();
         switch_directory(&source, &target, DirectoryMode::Copy).unwrap();
+        assert_eq!(
+            fs::read_to_string(target.join(definition)).unwrap(),
+            "# user-owned definition"
+        );
         assert_eq!(resolve_dir(&source).unwrap(), canonical(&target).unwrap());
         for file in FILES {
             assert_eq!(

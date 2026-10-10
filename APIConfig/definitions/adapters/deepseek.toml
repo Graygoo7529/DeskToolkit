@@ -1,0 +1,12 @@
+id = "balance_deepseek"
+label = "余额 · DeepSeek"
+description = "DeepSeek 账户余额接口"
+kind = "balance"
+layout_id = "balance"
+request_method = "GET"
+request_path = "/user/balance"
+request_auth = "bearer"
+balance_pointer = "/balance_infos/0/total_balance"
+unit_pointer = "/balance_infos/0/currency"
+default_unit = "CNY"
+
