@@ -33,11 +33,15 @@ API Probe 用一个账号模型保存直连或订阅类型、多个协议地址�
 
 ## 查询设置
 
-默认模型地址：Base URL 补齐 `/v1/models`；已有 `/v1` 不重复添加。Kimi 默认额度地址同理补齐 `/v1/usages`，例如 `https://api.kimi.com/coding/v1/usages`。
+Codex、Claude 的 Provider 详情与 API Probe 共用额度卡片、查询设置和 TOML 适配器。先在 TOML 布局中声明需要的余额 / 周期额度组件，再由适配器映射响应字段；缺失数据保留为 `—`，不会凭响应增加卡片。查询失败时 Provider 详情保留上次有效结果，并显示时间和错误提示。
 
-自定义路径以 `/` 开头时相对于域名根目录，否则相对于 Base URL。查询只支持同源 HTTP(S) GET，不跟随重定向。认证可选 Bearer、x-api-key 或不认证，前两者复用此 Provider 的现有密钥；Claude 模型查询还会带上 Anthropic 版本头。
+Provider 的查询设置可直接选择数据目录 `definitions/adapters/` 中的方案，也可选择“新建查询方案”指定组件、接口路径和字段映射。保存会在同一目录生成独立适配器与布局 TOML，三个页面均可选用。各账号只保存方案 ID，始终使用自己的 Base URL 和 Key。
 
-自定义额度字段使用 JSON Pointer：响应如 `{"data":{"balance":"12.5"}}`，余额字段填写 `/data/balance`。至少填写一个数值字段，支持数字或数字字符串；单位自行填写，应用不换算金额或推测缺失值。需要其他管理凭据、跨域额度接口或 POST 的供应商暂不适用此适配器。
+默认模型地址：Base URL 补齐 `/v1/models`；已有 `/v1` 不重复添加。模型查询认证可选 Bearer、x-api-key 或不认证，Claude 模型查询还会带上 Anthropic 版本头。额度查询使用方案中声明的路径、认证方式和 GET / POST 方法，不执行模型生成，不跟随重定向。
+
+查询路径以 `/` 开头时相对于域名根目录，否则相对于当前 Base URL；只允许同源 HTTP(S) 地址。自定义映射使用 JSON Pointer，如 `/data/balance`；支持数字和数字字符串，并可通过总量与已用计算剩余。详细格式见 [定义文件说明](definitions/README.md)。
+
+旧版 Codex、Claude 查询设置会一次性转换成方案引用，原文件备份至 `legacy-backup/`。旧自定义方案的余额、窗口、路径和认证均会保留；迁移后运行时只使用统一查询引擎。
 
 ## 配置与兼容
 

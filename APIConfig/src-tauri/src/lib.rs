@@ -5,6 +5,7 @@ mod claude;
 mod codex;
 mod data;
 mod inspection;
+mod quota;
 
 use data::{ClaudeHome, ClaudeProvider, Home, Provider};
 use serde::Serialize;
@@ -470,7 +471,33 @@ async fn inspect_provider(
             .find(|p| p.name == name)
             .ok_or("Provider 已被删除，请刷新后重试")?
     };
-    Ok(inspection::inspect(provider, matches!(scene, Scene::Claude), task).await)
+    Ok(match task {
+        inspection::Task::Quota => {
+            let registry = api_definitions::load_for_app(&app)?;
+            crate::quota::query(
+                &provider.url,
+                &provider.key,
+                &provider.inspection.quota.profile,
+                &registry,
+            )
+            .await
+        }
+        _ => {
+            inspection::inspect_models(
+                provider,
+                matches!(scene, Scene::Claude),
+                task == inspection::Task::Connection,
+            )
+            .await
+        }
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct InspectionInput {
+    models_path: String,
+    models_auth: inspection::Auth,
+    quota: quota::Input,
 }
 
 #[tauri::command]
@@ -478,7 +505,7 @@ fn save_inspection(
     app: AppHandle,
     scene: Scene,
     name: String,
-    settings: inspection::InspectionSettings,
+    settings: InspectionInput,
 ) -> Result<State, String> {
     let _guard = data::lock()?;
     let mut providers = providers_for(&app, scene)?;
@@ -486,8 +513,24 @@ fn save_inspection(
         .iter_mut()
         .find(|p| p.name == name)
         .ok_or("Provider 不存在")?;
-    inspection::validate(&provider.url, &settings)?;
-    provider.inspection = settings;
+    let mut next = inspection::InspectionSettings {
+        models_path: settings.models_path,
+        models_auth: settings.models_auth,
+        quota: quota::Settings::default(),
+    };
+    inspection::validate(&provider.url, &next)?;
+    let prefix = if matches!(scene, Scene::Claude) {
+        "claude"
+    } else {
+        "codex"
+    };
+    next.quota = settings.quota.save(
+        &data::data_dir(&app)?.join("definitions"),
+        &format!("{prefix}:{name}"),
+        &name,
+        &provider.url,
+    )?;
+    provider.inspection = next;
     match scene {
         Scene::Codex => data::save_providers(&app, &providers)?,
         Scene::Claude => data::save_claude_providers(&app, &providers)?,
@@ -563,7 +606,7 @@ mod list_tests {
     fn old_provider_files_receive_optional_inspection_defaults() {
         let provider: Provider =
             toml::from_str("name = 'old'\nurl = 'https://example.com'\nkey = 'fake'\n").unwrap();
-        assert_eq!(provider.inspection.quota.adapter, inspection::Adapter::None);
+        assert_eq!(provider.inspection.quota.profile, "none");
         let restored: Provider = toml::from_str(&toml::to_string(&provider).unwrap()).unwrap();
         assert_eq!(restored.name, "old");
     }

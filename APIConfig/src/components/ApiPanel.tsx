@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { ApiAccount, ApiEndpoint, ApiProbeResult, ApiProtocol, ApiQuotaSettings, ApiProbeProfile, ProbeResult } from '../types'
+import type { ApiAccount, ApiEndpoint, ApiProbeResult, ApiProtocol, QuotaInput, ApiProbeProfile, ProbeResult } from '../types'
 import * as api from '../api'
 import Icon from './Icon'
 import { ModalShell } from './Modals'
 import SortableList from './SortableList'
 import QuotaPanel from './QuotaPanel'
+import QuotaSettingsEditor, { quotaInput } from './QuotaSettingsEditor'
 
 const protocolLabels: Record<ApiProtocol, string> = {
   openai: 'OpenAI',
@@ -20,13 +21,11 @@ const protocolDefaults: Record<ApiProtocol, string> = {
   genai: 'https://generativelanguage.googleapis.com/v1beta',
   vertexai: 'https://aiplatform.googleapis.com/v1',
 }
-const emptyQuota = (): ApiQuotaSettings => ({ profile: 'none', presentation: 'balance', path: '', auth: 'bearer', balance_pointer: '', used_pointer: '', limit_pointer: '', remaining_pointer: '', reset_pointer: '', unit: '' })
 const makeEndpoint = (protocol: ApiProtocol, url = ''): ApiEndpoint => ({ protocol, url, auth: protocol === 'anthropic' || protocol === 'genai' || protocol === 'vertexai' ? 'x_api_key' : 'bearer' })
 function normalizeAccount(raw: ApiAccount): ApiAccount {
   const endpoints = raw.endpoints?.length ? raw.endpoints : [makeEndpoint('openai', raw.url)]
-  const profile = raw.quota?.profile || raw.quota_adapter || raw.quota?.adapter || 'none'
-  const quota = { ...emptyQuota(), ...raw.quota, profile }
-  return { ...raw, endpoints, quota, quota_adapter: profile, console_url: raw.console_url ?? '' }
+  const quota = quotaInput(raw.quota)
+  return { ...raw, endpoints, quota, console_url: raw.console_url ?? '' }
 }
 function normalizeProbe(raw: ApiProbeResult): ApiProbeResult {
   return { ...raw, model_sets: raw.model_sets ?? [] }
@@ -36,14 +35,14 @@ function ApiAccountModal({ original, profiles, onClose, onSave, onDelete, onReve
   original: ApiAccount | null
   profiles: ApiProbeProfile[]
   onClose: () => void
-  onSave: (original: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: ApiQuotaSettings, key: string, consoleUrl: string) => Promise<void>
+  onSave: (original: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: QuotaInput, key: string, consoleUrl: string) => Promise<void>
   onDelete?: () => Promise<void>
   onRevealKey: (id: string) => Promise<string>
 }) {
   const [name, setName] = useState(original?.name ?? '')
   const [kind, setKind] = useState<'subscription' | 'direct'>(original?.kind ?? 'direct')
   const [endpoints, setEndpoints] = useState<ApiEndpoint[]>(original?.endpoints?.length ? original.endpoints : [makeEndpoint('openai')])
-  const [quota, setQuota] = useState<ApiQuotaSettings>(original ? { ...emptyQuota(), ...(original.quota ?? {}), profile: original.quota?.profile || original.quota_adapter || 'none' } : emptyQuota())
+  const [quota, setQuota] = useState<QuotaInput>(() => quotaInput(original?.quota))
   const [consoleUrl, setConsoleUrl] = useState(original?.console_url ?? '')
   const [key, setKey] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -64,10 +63,10 @@ function ApiAccountModal({ original, profiles, onClose, onSave, onDelete, onReve
       <label className="field"><span>账号名称</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 Token Plan / DeepSeek" /></label>
       <div className="field"><span>账号类型</span><div className="segmented-control" role="group" aria-label="账号类型"><button type="button" className={kind === 'subscription' ? 'active' : ''} aria-pressed={kind === 'subscription'} onClick={() => setKind('subscription')}>订阅</button><button type="button" className={kind === 'direct' ? 'active' : ''} aria-pressed={kind === 'direct'} onClick={() => setKind('direct')}>直连</button></div><small className="field-hint">{kind === 'subscription' ? '显示周期额度、窗口额度和会员信息。' : '显示余额或服务商提供的账户额度。'}</small></div>
       <div className="field"><span>接口协议</span><div className="api-endpoint-editor">{endpoints.map((endpoint, index) => <div className="api-endpoint-row" key={index}><select value={endpoint.protocol} onChange={(e) => updateEndpoint(index, { protocol: e.target.value as ApiProtocol })}>{(Object.keys(protocolLabels) as ApiProtocol[]).map((protocol) => <option key={protocol} value={protocol}>{protocolLabels[protocol]}</option>)}</select><input value={endpoint.url} onChange={(e) => updateEndpoint(index, { url: e.target.value })} placeholder={protocolDefaults[endpoint.protocol]} /><select value={endpoint.auth} aria-label={`${protocolLabels[endpoint.protocol]} 认证`} onChange={(e) => updateEndpoint(index, { auth: e.target.value as ApiEndpoint['auth'] })}><option value="bearer">Bearer</option><option value="x_api_key">X-API-Key</option><option value="none">无认证</option></select>{endpoints.length > 1 && <button type="button" className="icon-btn" aria-label={`移除${protocolLabels[endpoint.protocol]}协议`} onClick={() => setEndpoints((old) => old.filter((_, i) => i !== index))}><Icon name="close" size={14} /></button>}</div>)}</div><button type="button" className="text-btn" onClick={() => setEndpoints((old) => [...old, makeEndpoint('anthropic')])}><Icon name="plus" size={13} />添加协议地址</button></div>
-      <label className="field"><span>API Key</span><div className="input-with-btn"><input type={showKey ? 'text' : 'password'} autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={original ? '点击显示读取当前 Key，或留空保留' : '输入 API Key'} /><button type="button" className="btn btn-ghost" disabled={keyLoading} onClick={() => void revealKey()}>{keyLoading ? '读取中…' : showKey ? '隐藏' : '显示'}</button></div></label>
+      <label className="field"><span>API Key</span><div className="input-with-btn"><input aria-label="API Key" type={showKey ? 'text' : 'password'} autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={original ? '点击显示读取当前 Key，或留空保留' : '输入 API Key'} /><button type="button" className="btn btn-ghost" disabled={keyLoading} onClick={() => void revealKey()}>{keyLoading ? '读取中…' : showKey ? '隐藏' : '显示'}</button></div></label>
       <label className="field"><span>控制台地址</span><input value={consoleUrl} onChange={(e) => setConsoleUrl(e.target.value)} placeholder="可选，例如 https://…/console" /></label>
-      <div className="field"><span>额度适配器</span><select value={quota.profile} onChange={(e) => setQuota((old) => ({ ...old, profile: e.target.value }))}>{profiles.filter((item) => item.kind === 'none' || item.kind === 'custom' || (kind === 'subscription' ? item.kind !== 'balance' : item.kind !== 'subscription')).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><small className="field-hint">{profiles.find((item) => item.id === quota.profile)?.description || '适配器使用此账号已配置的地址和 Key。'}</small></div>
-      {profiles.find((item) => item.id === quota.profile)?.kind === 'custom' && <div className="api-quota-fields"><label className="field"><span>展示组件</span><select aria-label="展示组件" value={quota.presentation ?? 'balance'} onChange={(e) => setQuota((old) => ({ ...old, presentation: e.target.value as 'balance' | 'quota' }))}><option value="balance">账户余额</option><option value="quota">周期额度</option></select></label><label className="field"><span>认证方式</span><select aria-label="额度认证方式" value={quota.auth} onChange={(e) => setQuota((old) => ({ ...old, auth: e.target.value as ApiQuotaSettings['auth'] }))}><option value="bearer">Bearer</option><option value="x_api_key">X-API-Key</option><option value="none">无认证</option></select></label><input value={quota.path} onChange={(e) => setQuota((old) => ({ ...old, path: e.target.value }))} placeholder="查询路径，例如 /dashboard/billing" /><input value={quota.balance_pointer} onChange={(e) => setQuota((old) => ({ ...old, balance_pointer: e.target.value }))} placeholder="余额 JSON Pointer，例如 /data/balance" /><input value={quota.used_pointer} onChange={(e) => setQuota((old) => ({ ...old, used_pointer: e.target.value }))} placeholder="已用 JSON Pointer（可选）" /><input value={quota.limit_pointer} onChange={(e) => setQuota((old) => ({ ...old, limit_pointer: e.target.value }))} placeholder="总量 JSON Pointer（可选）" /><input value={quota.remaining_pointer} onChange={(e) => setQuota((old) => ({ ...old, remaining_pointer: e.target.value }))} placeholder="剩余 JSON Pointer（可选）" /><input value={quota.reset_pointer} onChange={(e) => setQuota((old) => ({ ...old, reset_pointer: e.target.value }))} placeholder="重置时间 JSON Pointer（可选）" /><input value={quota.unit} onChange={(e) => setQuota((old) => ({ ...old, unit: e.target.value }))} placeholder="单位（可选）" /></div>}    </fieldset>
+      <QuotaSettingsEditor value={quota} profiles={profiles} kind={kind} onChange={setQuota} />
+    </fieldset>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="modal-actions api-modal-actions">{onDelete && (confirmDelete ? <span className="delete-confirm"><span>确认删除此账号？</span><button className="text-btn danger" disabled={saving} onClick={() => void onDelete()}>确认删除</button></span> : <button className="text-btn danger modal-delete" disabled={saving} onClick={() => setConfirmDelete(true)}>删除账号</button>)}<span className="modal-actions-spacer" /><button className="btn btn-ghost" disabled={saving} onClick={onClose}>取消</button><button className="btn btn-primary" disabled={saving || !name.trim() || !endpoints.some((e) => e.url.trim()) || (!original && !key.trim())} onClick={() => void save()}>{saving ? '保存中…' : '保存'}</button></div>
   </ModalShell>
@@ -106,7 +105,7 @@ export default function ApiPanel({ visible, pushToast }: { visible: boolean; pus
   const refreshAll = async (list = accounts) => { await Promise.all(list.filter((account) => account.configured).map((account) => refreshAccount(account))) }
   const load = async (autoRefresh: boolean) => { try { const [profileList, rawAccounts] = await Promise.all([api.getApiProbeProfiles(), api.getApiAccounts()]); setProfiles(profileList); const next = rawAccounts.map((account) => normalizeAccount(account)); setAccounts(next); const current = next.find((account) => account.id === selectedId) ?? next[0] ?? null; setSelectedId(current?.id ?? null); if (autoRefresh) void refreshAll(next) } catch (e) { pushToast('error', String(e)) } }
   useEffect(() => { if (visible && !opening.current) { opening.current = true; void load(true) } else if (!visible) opening.current = false }, [visible])
-  const saveAccount = async (original: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: ApiQuotaSettings, key: string, consoleUrl: string) => { const next = (await api.saveApiAccount(original, name, kind, endpoints, quota, key, consoleUrl)).map((account) => normalizeAccount(account)); setAccounts(next); setProfiles(await api.getApiProbeProfiles().catch(() => profiles)); const saved = next.find((item) => item.name === name.trim()); if (saved) { setSelectedId(saved.id); setResults((old) => { const copy = { ...old }; if (original) delete copy[`api:${original}`]; delete copy[saved.id]; return copy }); void refreshAccount(saved) } pushToast('success', `已保存 API「${name.trim()}」`) }
+  const saveAccount = async (original: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: QuotaInput, key: string, consoleUrl: string) => { const next = (await api.saveApiAccount(original, name, kind, endpoints, quota, key, consoleUrl)).map((account) => normalizeAccount(account)); setAccounts(next); setProfiles(await api.getApiProbeProfiles().catch(() => profiles)); const saved = next.find((item) => item.name === name.trim()); if (saved) { setSelectedId(saved.id); setResults((old) => { const copy = { ...old }; if (original) delete copy[`api:${original}`]; delete copy[saved.id]; return copy }); void refreshAccount(saved) } pushToast('success', `已保存 API「${name.trim()}」`) }
   const remove = async (account: ApiAccount) => { const next = (await api.deleteApiAccount(account.name)).map((item) => normalizeAccount(item)); setAccounts(next); setResults((old) => { const copy = { ...old }; delete copy[account.id]; return copy }); setSelectedId(next[0]?.id ?? null); setEditing(undefined); pushToast('success', `已移除「${account.name}」`) }
   const checkModel = async (model: string) => { if (!selected || checkingKey) return; const key = `${selected.id}:${protocol}:${model}`; setCheckingKey(key); try { const checked = await api.checkApiModel(selected.id, model, protocol); setChecks((old) => ({ ...old, [key]: checked })) } catch (e) { setChecks((old) => ({ ...old, [key]: { status: 'error', message: String(e), checked_at: Date.now(), latency_ms: 0, http_status: null, models: [], quota: null } })) } finally { setCheckingKey(null) } }
   const modelCheckKey = (model: string) => selected ? `${selected.id}:${protocol}:${model}` : ''

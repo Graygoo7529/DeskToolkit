@@ -280,7 +280,7 @@ pub fn write_custom_adapter(
         request_method: "GET".into(),
         request_path: path.trim().into(),
         request_auth: auth.trim().into(),
-        balance_pointer: if presentation == "balance" {
+        balance_pointer: if presentation == "balance" || presentation == "balance_quota" {
             balance.trim()
         } else {
             ""
@@ -289,7 +289,7 @@ pub fn write_custom_adapter(
         default_unit: unit.trim().into(),
         ..Default::default()
     };
-    if presentation == "quota" {
+    if presentation == "quota" || presentation == "balance_quota" {
         definition.windows.push(WindowDefinition {
             id: "custom".into(),
             required: true,
@@ -301,7 +301,7 @@ pub fn write_custom_adapter(
             ..Default::default()
         });
     }
-    let layout = LayoutDefinition {
+    let mut layout = LayoutDefinition {
         id: definition.layout_id.clone(),
         label: if presentation == "balance" {
             "余额"
@@ -330,6 +330,16 @@ pub fn write_custom_adapter(
             .into(),
         }],
     };
+    if presentation == "balance_quota" {
+        layout.blocks.insert(
+            0,
+            LayoutBlock {
+                component: "balance_card".into(),
+                source: "balance".into(),
+                title: "账户余额".into(),
+            },
+        );
+    }
     Registry {
         adapters: vec![definition.clone()],
         layouts: vec![layout.clone()],

@@ -6,20 +6,31 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 
 async function fixture(page: Page, options: { delay?: number; count?: number } = {}) {
   await page.addInitScript(({ delay, count }) => {
-    const inspection = (adapter = 'none') => ({ models_path: '', models_auth: 'bearer', quota: { adapter, path: '', auth: 'bearer', balance_pointer: '', used_pointer: '', limit_pointer: '', remaining_pointer: '', reset_pointer: '', unit: '' } })
+    const inspection = (profile = 'none') => ({ models_path: '', models_auth: 'bearer', quota: { profile } })
     const provider = (name: string, adapter = 'none') => ({ name, color: name === 'Relay' ? '#86CDB7' : '#A7B8EF', url: `https://${name.toLowerCase().replace(/ /g, '-')}.example/v1`, key_masked: 'test…only', inspection: inspection(adapter) })
     const initial = {
       homes: [{ name: 'Personal', location: 'D:\\Fixtures\\codex' }, { name: 'Work', location: 'D:\\Fixtures\\work' }, { name: 'Lab', location: 'D:\\Fixtures\\lab' }],
-      providers: [provider('Kimi', 'kimi'), provider('Relay', 'custom'), provider('Offline'), ...Array.from({ length: count ?? 0 }, (_, i) => provider(`Provider ${i + 1}`))],
-      claude_homes: [{ name: 'Claude Home', location: 'D:\\Fixtures\\claude' }], claude_providers: [provider('Claude A'), provider('Claude B')],
+      providers: [provider('Kimi', 'quota_kimi'), provider('Relay', 'quota_kimi'), provider('Offline'), ...Array.from({ length: count ?? 0 }, (_, i) => provider(`Provider ${i + 1}`))],
+      claude_homes: [{ name: 'Claude Home', location: 'D:\\Fixtures\\claude' }], claude_providers: [provider('Claude A'), provider('Claude B', 'balance_deepseek')],
       statuses: { Work: { matched_provider: 'Relay', config_exists: true, auth_exists: true, base_url: 'https://relay.example/v1', api_key_masked: 'test…only' } },
       claude_statuses: {}, data_dir: 'D:\\Fixtures\\APIConfig',
     }
     const state = JSON.parse(localStorage.getItem('fixture-state') ?? JSON.stringify(initial))
-    let kimi = { name: 'Kimi Code', url: 'https://api.kimi.com/coding/v1', key_masked: 'test…only', configured: true }
-    let apiAccounts = [{ id: 'api:Token Plan', kind: 'api', name: 'Token Plan', url: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', anthropic_url: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic', key_masked: 'sk-sp…only', color: '#A7B8EF', configured: true }]
-    const subscriptions = () => [...apiAccounts, { id: 'kimi', kind: 'kimi', name: kimi.name, url: kimi.url, anthropic_url: '', key_masked: kimi.key_masked, color: '#9CA9FF', configured: kimi.configured }]
-    const controls = { calls: [] as { cmd: string; args: any }[], delay: delay ?? 50, folder: 'D:\\Fixtures\\Moved', failDirectory: false, failModels: false, failKimi: false, failProbe: false, kimiPartial: false }
+    const profiles = [
+      { id: 'none', kind: 'none', label: '未配置', description: '', layout_id: 'none', layout_label: '', blocks: [] },
+      { id: 'balance_custom', kind: 'custom', label: '新建查询方案', description: '', layout_id: 'balance', layout_label: '余额', blocks: [] },
+      { id: 'quota_kimi', kind: 'subscription', label: '额度 [Kimi]', description: '使用当前账号地址和 Key', layout_id: 'weekly_hourly', layout_label: '订阅额度', blocks: [
+        { component: 'quota_card', source: 'windows.weekly', title: '周额度' }, { component: 'quota_card', source: 'windows.five_hour', title: '5 小时窗口' },
+      ] },
+      { id: 'balance_deepseek', kind: 'balance', label: '余额 [DeepSeek]', description: '', layout_id: 'balance', layout_label: '账户余额', blocks: [{ component: 'balance_card', source: 'balance', title: '账户余额' }] },
+    ]
+    const account = (name: string, kimi = false) => ({ id: `api:${name}`, name, kind: 'subscription',
+      url: 'https://fixture.example/v1', key_masked: 'fixture…only', color: '#A7B8EF', configured: true, console_url: '',
+      endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth: 'bearer' }, ...kimi ? [] : [{ protocol: 'anthropic', url: 'https://fixture.example/anthropic', auth: 'x_api_key' }]],
+      quota: { profile: kimi ? 'quota_kimi' : 'none' },
+    })
+    let apiAccounts = [account('Token Plan'), account('Kimi Code', true)]
+    const controls = { calls: [] as { cmd: string; args: any }[], delay: delay ?? 50, folder: 'D:\\Fixtures\\Moved', failDirectory: false, failModels: false, failKimi: false, failQuota: false, failProbe: false, kimiPartial: false }
     ;(window as any).__fixture = controls
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (cmd: string, args: any = {}) => {
       controls.calls.push({ cmd, args })
@@ -29,27 +40,35 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
       if (cmd === 'change_data_dir') {
         if (controls.failDirectory) throw '目标目录已有配置；请选择使用已有配置'
         state.data_dir = args.path
-        if (args.mode === 'existing') { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; kimi = { ...kimi, name: 'Saved Kimi' } }
+        if (args.mode === 'existing') { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; apiAccounts = [account('Saved Kimi', true)] }
       }
-      if (cmd === 'get_kimi_config') return kimi
-      if (cmd === 'get_api_accounts') return subscriptions()
+      if (cmd === 'get_api_probe_profiles') return profiles
+      if (cmd === 'get_api_accounts') return apiAccounts
       if (cmd === 'probe_api_account') {
         await new Promise((resolve) => setTimeout(resolve, controls.delay))
         if (controls.failProbe) throw '网络连接失败'
-        const isKimi = args.id === 'kimi'
-        return { models: { ...base(), models: [{ id: isKimi ? 'kimi-k2.5' : 'qwen3.7-plus', name: null }, { id: isKimi ? 'kimi-k2' : 'qwen3.6-flash', name: null }, ...isKimi ? [] : [{ id: 'glm-5.3', name: null }]] }, quota: isKimi ? controls.failKimi ? { ...base(), status: 'error', message: 'HTTP 401 · 认证失败', quota: null } : { ...base(), status: controls.kimiPartial ? 'partial' : 'ok', quota: { balance: null, unit: '', membership: 'LEVEL_2', windows: [{ name: '周额度', used: controls.kimiPartial ? null : 26, limit: 100, remaining: 74, reset_at: '2026-10-05T12:00:00Z' }, ...controls.kimiPartial ? [] : [{ name: '5 小时窗口', used: 4, limit: 100, remaining: 96, reset_at: '2026-10-02T12:00:00Z' }]] } } : null }
+        const current = apiAccounts.find((a) => a.id === args.id)!
+        const isKimi = current.quota.profile === 'quota_kimi'
+        const models = [{ id: isKimi ? 'kimi-k2.5' : 'qwen3.7-plus', name: null }, { id: isKimi ? 'kimi-k2' : 'qwen3.6-flash', name: null }, ...isKimi ? [] : [{ id: 'glm-5.3', name: null }]]
+        return { model_sets: current.endpoints.map((ep) => ({ protocol: ep.protocol, result: { ...base(), models } })), quota: isKimi ? controls.failKimi ? { ...base(), status: 'error', message: 'HTTP 401 · 认证失败', quota: null } : { ...base(), status: controls.kimiPartial ? 'partial' : 'ok', quota: { balance: null, unit: '', membership: 'LEVEL_2', windows: [{ id: 'weekly', name: '周额度', used: controls.kimiPartial ? null : 26, limit: 100, remaining: 74, reset_at: '2026-10-05T12:00:00Z' }, ...controls.kimiPartial ? [] : [{ id: 'five_hour', name: '5 小时窗口', used: 4, limit: 100, remaining: 96, reset_at: '2026-10-02T12:00:00Z' }]] } } : null }
       }
       if (cmd === 'check_api_model') return { ...base(), message: `${args.protocol} 可用` }
-      if (cmd === 'save_api_account') { apiAccounts = [{ id: `api:${args.name}`, kind: 'api', name: args.name, url: args.url, anthropic_url: args.anthropicUrl, key_masked: 'sk-sp…only', color: '#A7B8EF', configured: true }]; return subscriptions() }
-      if (cmd === 'delete_api_account') { apiAccounts = []; return subscriptions() }
-      if (cmd === 'save_kimi_config') { kimi = { ...kimi, name: args.name, url: args.url, configured: true }; return kimi }
+      if (cmd === 'save_api_account') {
+        const old = apiAccounts.find((a) => a.name === args.originalName)!
+        apiAccounts = apiAccounts.filter((a) => a !== old)
+        apiAccounts.push({ ...old, id: `api:${args.name}`, name: args.name, endpoints: args.endpoints, quota: { profile: args.quota.profile } })
+        return apiAccounts
+      }
+      if (cmd === 'delete_api_account') { apiAccounts = apiAccounts.filter((a) => a.name !== args.name); return apiAccounts }
       if (cmd === 'inspect_provider') {
         const p = providers.find((p: any) => p.name === args.name)
         await new Promise((resolve) => setTimeout(resolve, controls.delay))
-        if (args.task === 'quota' && p.inspection.quota.adapter === 'none') return { ...base(), status: 'skipped', message: '未配置额度查询，已跳过' }
+        if (args.task === 'quota' && p.inspection.quota.profile === 'none') return { ...base(), status: 'skipped', message: '未配置额度查询，已跳过' }
         if (args.name === 'Offline' || (args.task === 'models' && controls.failModels)) return { ...base(), status: 'error', message: 'HTTP 401 · 认证失败或无权限', http_status: 401 }
         if (args.task === 'models') return { ...base(), models: [{ id: 'fixture-opus', name: 'Fixture Opus' }, { id: 'fixture-fast', name: null }] }
-        if (args.task === 'quota') return { ...base(), status: 'partial', message: '部分额度字段缺失，已展示可用数据', quota: { balance: null, unit: '', membership: null, windows: [{ name: '周额度', used: null, limit: 100, remaining: 30, reset_at: null }] } }
+        if (args.task === 'quota' && controls.failQuota) return { ...base(), status: 'error', message: '额度服务暂不可用' }
+        if (args.task === 'quota' && p.inspection.quota.profile === 'balance_deepseek') return { ...base(), quota: { balance: 0, unit: 'CNY', membership: null, windows: [{ id: 'unused', remaining: 99 }] } }
+        if (args.task === 'quota') return { ...base(), status: 'partial', message: '部分额度字段缺失，已展示可用数据', quota: { balance: null, unit: '', membership: null, windows: [{ id: 'weekly', name: '错误的响应标题', used: null, limit: 100, remaining: 30, reset_at: null }] } }
         return base()
       }
       if (cmd === 'reorder_items') {
@@ -113,7 +132,7 @@ test('全选只用于批量查询，详情隐藏且不挤压目标配置', async
   await drawer.getByRole('textbox', { name: '搜索模型' }).fill('opus')
   await expect(drawer.locator('.model-list')).toHaveText('fixture-opusFixture Opus')
   await drawer.locator('summary').filter({ hasText: '额度查询' }).click()
-  await expect(drawer.locator('.quota-results')).toContainText('已用 —')
+  await expect(drawer.locator('.subscription-quota-values').first()).toHaveText('已用—总量100剩余30')
   expect(await panel.locator('.target-pane').boundingBox()).toEqual(targetBefore)
   await capture(page, testInfo, 'provider-drawer.png')
   await page.keyboard.press('Escape')
@@ -180,14 +199,14 @@ test('Claude 额度设置仍可保存，目标可应用并查看配置详情', a
   let drawer = await details(page, 'Claude A')
   await drawer.getByRole('button', { name: '查询设置', exact: true }).last().click()
   const modal = page.getByRole('dialog')
-  await modal.getByLabel('额度适配器').selectOption('custom')
+  await modal.getByLabel('额度适配器').selectOption('balance_custom')
   await modal.getByLabel('额度接口路径').fill('/account/usage')
-  await modal.getByLabel('余额', { exact: true }).fill('/data/balance')
-  await modal.getByLabel('单位').fill('USD')
+  await modal.getByLabel('余额字段', { exact: true }).fill('/data/balance')
+  await modal.getByLabel('额度单位').fill('USD')
   await modal.getByRole('button', { name: '保存查询设置' }).click()
   await expect(modal).toHaveCount(0)
   const args = await page.evaluate(() => (window as any).__fixture.calls.find((c: any) => c.cmd === 'save_inspection').args)
-  expect(args.settings.quota).toMatchObject({ adapter: 'custom', path: '/account/usage', balance_pointer: '/data/balance', unit: 'USD' })
+  expect(args.settings.quota).toMatchObject({ profile: 'balance_custom', presentation: 'balance', path: '/account/usage', balance_pointer: '/data/balance', unit: 'USD' })
   await page.getByRole('button', { name: 'Claude A', exact: true }).click()
   await page.getByRole('button', { name: '应用「Claude A」到「Claude Home」', exact: true }).click()
   await page.getByRole('button', { name: '查看 Claude Home 配置', exact: true }).click()
@@ -222,7 +241,7 @@ test('停止批量队列保留已开始任务且不取消应用选择', async ({
 test('API 订阅首次打开自动刷新，显示 Kimi 额度且可恢复部分数据', async ({ page }, testInfo) => {
   await fixture(page)
   expect(await page.evaluate(() => (window as any).__fixture.calls.some((c: any) => c.cmd === 'probe_api_account'))).toBe(false)
-  await page.getByRole('tab', { name: 'API 订阅', exact: true }).click()
+  await page.getByRole('tab', { name: 'API Probe', exact: true }).click()
   const panel = page.locator('#panel-api')
   await panel.locator('.api-account').filter({ hasText: 'Kimi Code' }).click()
   await expect(panel.locator('.subscription-quota-ring').first()).toContainText('74%')
@@ -232,20 +251,20 @@ test('API 订阅首次打开自动刷新，显示 Kimi 额度且可恢复部分�
   await capture(page, testInfo, 'api-subscriptions-kimi.png')
   await page.evaluate(() => { (window as any).__fixture.failKimi = true })
   await panel.getByRole('button', { name: '刷新', exact: true }).click()
-  await expect(panel.locator('.quota-error')).toContainText('HTTP 401')
-  await expect(panel.locator('.subscription-quota-ring').first()).toContainText('74%')
+  await expect(panel.locator('.inline-error')).toContainText('HTTP 401')
+  await expect(panel.locator('.subscription-quota-ring').first()).toContainText('—')
   await expect(panel.locator('.api-account').filter({ hasText: 'Kimi Code' }).locator('.api-account-dot')).toHaveClass(/ok/)
   await page.evaluate(() => { (window as any).__fixture.failKimi = false; (window as any).__fixture.kimiPartial = true })
   await panel.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(panel.locator('.subscription-quota-ring').nth(1)).toContainText('—')
   await page.getByRole('tab', { name: 'Codex', exact: true }).click()
-  await page.getByRole('tab', { name: 'API 订阅', exact: true }).click()
+  await page.getByRole('tab', { name: 'API Probe', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__fixture.calls.filter((c: any) => c.cmd === 'probe_api_account').length)).toBe(6)
 })
 
 test('API 订阅保留模型过滤、协议切换与 Kimi Key 编辑', async ({ page }) => {
   await fixture(page)
-  await page.getByRole('tab', { name: 'API 订阅', exact: true }).click()
+  await page.getByRole('tab', { name: 'API Probe', exact: true }).click()
   const panel = page.locator('#panel-api')
   await panel.getByLabel('过滤模型').fill('qwen3.7')
   await expect(panel.locator('.api-model-row')).toHaveCount(1)
@@ -259,12 +278,12 @@ test('API 订阅保留模型过滤、协议切换与 Kimi Key 编辑', async ({ 
   await expect(panel.locator('.subscription-quota-ring').first()).toBeVisible()
   await panel.getByRole('button', { name: '编辑账号' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByLabel('Kimi API Key')).toHaveValue('')
+  await expect(dialog.getByLabel('API Key', { exact: true })).toHaveValue('')
   await dialog.getByLabel('账号名称').fill('My Kimi')
-  await dialog.getByRole('button', { name: '保存账号' }).click()
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(panel.locator('.api-account').filter({ hasText: 'My Kimi' })).toBeVisible()
-  const call = await page.evaluate(() => (window as any).__fixture.calls.findLast((c: any) => c.cmd === 'save_kimi_config'))
+  const call = await page.evaluate(() => (window as any).__fixture.calls.findLast((c: any) => c.cmd === 'save_api_account'))
   expect(call.args.key).toBe('')
 })
 
@@ -299,7 +318,7 @@ test('数据目录可选择并复制，切换即时刷新且重启保持', async
   await codex(page).getByRole('button', { name: 'Relay', exact: true }).click()
   await page.getByRole('button', { name: '数据目录设置' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('kimi.toml')
+  await expect(dialog).toContainText('definitions/')
   await dialog.getByRole('button', { name: '选择目录', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: '新的数据目录' })).toHaveValue('D:\\Fixtures\\Moved')
   await capture(page, testInfo, 'storage-settings.png')
@@ -325,7 +344,7 @@ test('目录冲突可修正，使用已有配置会替换场景及 Kimi 账号�
   await dialog.getByRole('button', { name: '使用此目录', exact: true }).click()
   await expect(codex(page).locator('.provider-name')).toHaveText(['Saved provider'])
   await idle(page)
-  await page.getByRole('tab', { name: 'API 订阅', exact: true }).click()
+  await page.getByRole('tab', { name: 'API Probe', exact: true }).click()
   await expect(page.locator('.api-account').filter({ hasText: 'Saved Kimi' })).toBeVisible()
   const calls = await page.evaluate(() => (window as any).__fixture.calls)
   const switched = calls.findLastIndex((c: any) => c.cmd === 'change_data_dir')
@@ -334,17 +353,17 @@ test('目录冲突可修正，使用已有配置会替换场景及 Kimi 账号�
 
 test('API 订阅整合账号状态、额度与协议模型检查，删除位于编辑中', async ({ page }, testInfo) => {
   await fixture(page)
-  await page.getByRole('tab', { name: 'API 订阅', exact: true }).click()
+  await page.getByRole('tab', { name: 'API Probe', exact: true }).click()
   const panel = page.locator('#panel-api')
   await expect(panel.locator('.api-account').first()).toContainText('Token Plan')
-  await expect(panel.locator('.api-quota-section')).toContainText('bl usage token-plan')
+  await expect(panel.locator('.api-quota-section')).toContainText('未配置额度适配器')
   const tokenPlan = panel.locator('.api-account').filter({ hasText: 'Token Plan' })
   await expect(tokenPlan.locator('.api-account-dot')).toHaveClass(/ok/)
   await page.evaluate(() => { (window as any).__fixture.failProbe = true })
   await panel.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(tokenPlan.locator('.api-account-dot')).toHaveClass(/error/)
   await page.evaluate(() => { (window as any).__fixture.failProbe = false })
-  await expect(panel.locator('.api-quota-section')).toContainText('当前 Key 未提供订阅 Credits 查询接口')
+  await expect(panel.locator('.api-quota-section')).toContainText('未配置额度适配器')
   await expect(panel.locator('.api-model-row')).toHaveCount(3)
   await capture(page, testInfo, 'api-management.png')
   await panel.getByRole('button', { name: '编辑账号', exact: true }).click()
@@ -356,3 +375,27 @@ test('API 订阅整合账号状态、额度与协议模型检查，删除位于�
   await panel.getByRole('button', { name: /qwen3\.7-plus/ }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__fixture.calls.some((c: any) => c.cmd === 'check_api_model' && c.args.protocol === 'anthropic'))).toBe(true)
 })
+
+for (const scene of ['Codex', 'Claude'] as const) {
+  test(`${scene} 共用 TOML 额度方案，查询前显示固定组件，失败保留上次结果`, async ({ page }, testInfo) => {
+    await fixture(page); await idle(page)
+    await page.getByRole('tab', { name: scene, exact: true }).click()
+    const name = scene === 'Codex' ? 'Kimi' : 'Claude B'
+    const drawer = await details(page, name)
+    await drawer.locator('summary').filter({ hasText: '额度查询' }).click()
+    const cards = drawer.locator('.subscription-quota')
+    await expect(cards).toHaveCount(scene === 'Codex' ? 2 : 1)
+    await expect(cards.first()).toHaveAttribute('data-component', scene === 'Codex' ? 'quota_card' : 'balance_card')
+    await expect(cards.first()).toContainText('—')
+    await drawer.getByRole('button', { name: '额度查询', exact: true }).click()
+    await expect(cards.first()).toContainText(scene === 'Codex' ? '30%' : '余额0单位CNY')
+    await expect(cards).not.toContainText(['错误的响应标题'])
+    if (scene === 'Codex') await expect(cards.nth(1)).toContainText('—')
+    await page.evaluate(() => { (window as any).__fixture.failQuota = true })
+    await drawer.getByRole('button', { name: '额度查询', exact: true }).click()
+    await expect(drawer.locator('.stale')).toContainText('上次可用结果')
+    await expect(drawer.locator('.inline-error')).toHaveText('额度服务暂不可用')
+    await expect(cards.first()).toContainText(scene === 'Codex' ? '30%' : '余额0单位CNY')
+    await capture(page, testInfo, `${scene.toLowerCase()}-quota.png`)
+  })
+}

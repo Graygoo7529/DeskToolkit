@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Home, Provider, ProbeTask, Scene, State } from '../types'
+import type { ApiProbeProfile, Home, Provider, ProbeTask, Scene, State } from '../types'
 import * as api from '../api'
 import { useInspections } from '../useInspections'
 import ProviderCard from './ProviderCard'
@@ -26,6 +26,8 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
   const [allSelected, setAllSelected] = useState(false)
   const [search, setSearch] = useState('')
   const [homeSearch, setHomeSearch] = useState('')
+  const [profiles, setProfiles] = useState<ApiProbeProfile[]>([])
+  const [profileError, setProfileError] = useState('')
   const [modal, setModal] = useState<Modal>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [mutating, setMutating] = useState(false)
@@ -40,6 +42,18 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
     started.current = true
     void inspections.run(providers.map((p) => p.name), ['connection'], true)
   }, [])
+  const refreshProfiles = async () => {
+    try { const next = await api.getApiProbeProfiles(); setProfiles(next); setProfileError('') }
+    catch (error) { setProfiles([]); setProfileError(String(error)) }
+  }
+  const quotaDialog = modal?.kind === 'provider-detail' ? modal.name : modal?.kind === 'inspection' ? modal.provider.name : null
+  useEffect(() => {
+    if (!quotaDialog) return
+    let active = true
+    void api.getApiProbeProfiles().then((next) => { if (active) { setProfiles(next); setProfileError('') } })
+      .catch((error) => { if (active) { setProfiles([]); setProfileError(String(error)) } })
+    return () => { active = false }
+  }, [quotaDialog, modal?.kind])
   const selected = providers.find((p) => p.name === selectedName) ?? null
   const detailProvider = modal?.kind === 'provider-detail' ? providers.find((p) => p.name === modal.name) : null
   const detailHome = modal?.kind === 'home-detail' ? homes.find((h) => h.name === modal.name) : null
@@ -87,7 +101,7 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
     })
     setApplying(null)
   }
-  const run = (tasks: ProbeTask[]) => void inspections.run(providers.map((p) => p.name), tasks)
+  const run = (tasks: ProbeTask[]) => { if (tasks.includes('quota')) void refreshProfiles(); void inspections.run(providers.map((p) => p.name), tasks) }
   const p = inspections.progress
   const detailStatus = detailHome ? (isClaude ? state.claude_statuses[detailHome.name] : state.statuses[detailHome.name]) : null
 
@@ -142,8 +156,9 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
     </div>
     {detailProvider && <ModalShell drawer title={detailProvider.name} onClose={() => setModal(null)}>
       <p className="drawer-subtitle">Provider 详情</p><div className="detail-address">{detailProvider.url}</div><div className="detail-key mono">{detailProvider.key_masked}</div>
-      <ProviderInspection results={inspections.results[detailProvider.name]} busy={inspections.busy || mutating} configuredQuota={detailProvider.inspection.quota.adapter !== 'none'}
-        onRun={(task) => void inspections.run([detailProvider.name], [task])} onSettings={() => setModal({ kind: 'inspection', provider: detailProvider })} />
+      {profileError && <p className="form-error" role="alert">{profileError}</p>}
+      <ProviderInspection color={detailProvider.color} profile={profiles.find((p) => p.id === detailProvider.inspection.quota.profile)} results={inspections.results[detailProvider.name]} busy={inspections.busy || mutating} configuredQuota={!!detailProvider.inspection.quota.profile && detailProvider.inspection.quota.profile !== 'none'}
+        onRun={(task) => { if (task === 'quota') void refreshProfiles(); void inspections.run([detailProvider.name], [task]) }} onSettings={() => setModal({ kind: 'inspection', provider: detailProvider })} />
       <div className="drawer-actions"><button className="btn btn-ghost" disabled={mutating} onClick={() => setModal({ kind: 'provider', original: detailProvider })}>编辑 Provider</button>
         <button className="btn btn-ghost" disabled={mutating} onClick={() => setModal({ kind: 'inspection', provider: detailProvider })}>查询设置</button>
         <button className="text-btn danger" disabled={mutating} onClick={() => { setModal(null); setConfirm({ kind: 'provider', name: detailProvider.name }) }}>删除</button></div>
@@ -156,8 +171,8 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
     </ModalShell>}
     {modal?.kind === 'home' && <HomeEditor original={modal.original} onClose={() => !mutating && setModal(null)} onSave={saveHome} />}
     {modal?.kind === 'provider' && <ProviderEditor original={modal.original} onClose={() => !mutating && setModal(null)} onSave={saveProvider} />}
-    {modal?.kind === 'inspection' && <InspectionModal provider={modal.provider} onClose={() => setModal(null)} onSave={async (settings) => {
-      onState(await api.saveInspection(scene, modal.provider.name, settings)); inspections.invalidate(modal.provider.name); pushToast('success', '已保存查询设置')
+    {modal?.kind === 'inspection' && <InspectionModal profilesError={profileError} onReloadProfiles={() => void refreshProfiles()} profiles={profiles} provider={modal.provider} onClose={() => setModal(null)} onSave={async (settings) => {
+      onState(await api.saveInspection(scene, modal.provider.name, settings)); inspections.invalidate(modal.provider.name); await refreshProfiles(); pushToast('success', '已保存查询设置')
     }} />}
     {confirm && <ConfirmModal title={confirm.kind === 'home' ? '移除配置' : '删除 Provider'} message={`确定移除「${confirm.name}」？${confirm.kind === 'home' ? '仅移除面板记录，不删除实际配置文件。' : '已应用到 Home 的配置仍会保留。'}`} onCancel={() => !mutating && setConfirm(null)} onConfirm={remove} />}
   </>

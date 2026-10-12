@@ -26,36 +26,13 @@ pub enum Auth {
     None,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum Adapter {
-    #[default]
-    None,
-    Kimi,
-    Custom,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct InspectionSettings {
     /// 空值自动补齐版本前缀；以 / 开头则相对于域名，否则相对于 Base URL。
     pub models_path: String,
     pub models_auth: Auth,
-    pub quota: QuotaSettings,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct QuotaSettings {
-    pub adapter: Adapter,
-    pub path: String,
-    pub auth: Auth,
-    pub balance_pointer: String,
-    pub used_pointer: String,
-    pub limit_pointer: String,
-    pub remaining_pointer: String,
-    pub reset_pointer: String,
-    pub unit: String,
+    pub quota: crate::quota::Settings,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -155,138 +132,7 @@ pub fn endpoint(base: &str, path: &str, default_leaf: &str) -> Result<Url, Strin
 
 pub fn validate(base: &str, settings: &InspectionSettings) -> Result<(), String> {
     endpoint(base, &settings.models_path, "models")?;
-    let q = &settings.quota;
-    if q.adapter != Adapter::None {
-        endpoint(base, &q.path, "usages")?;
-    }
-    if q.adapter == Adapter::Custom {
-        if q.path.trim().is_empty() {
-            return Err("自定义额度需要查询路径".into());
-        }
-        let fields = [
-            &q.balance_pointer,
-            &q.used_pointer,
-            &q.limit_pointer,
-            &q.remaining_pointer,
-        ];
-        if fields.iter().all(|s| s.trim().is_empty()) {
-            return Err("至少配置一个数值字段映射".into());
-        }
-        for p in fields.into_iter().chain([&q.reset_pointer]) {
-            if !p.is_empty() && !p.starts_with('/') {
-                return Err("字段路径需使用 JSON Pointer，例如 /data/balance".into());
-            }
-        }
-    }
     Ok(())
-}
-
-fn number(value: Option<&Value>) -> Option<f64> {
-    let v = value?;
-    v.as_f64()
-        .or_else(|| v.as_str()?.trim().parse().ok())
-        .filter(|n| n.is_finite())
-}
-
-fn window(v: &Value, name: &str) -> Option<QuotaWindow> {
-    let result = QuotaWindow {
-        name: name.into(),
-        id: name.into(),
-        used: number(v.get("used")),
-        limit: number(v.get("limit")),
-        remaining: number(v.get("remaining")),
-        reset_at: v
-            .get("resetTime")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-    };
-    (result.used.is_some() || result.limit.is_some() || result.remaining.is_some())
-        .then_some(result)
-}
-
-pub fn parse_quota(body: &Value, config: &QuotaSettings) -> Result<(Quota, bool), String> {
-    let mut quota = Quota {
-        unit: config.unit.clone(),
-        ..Quota::default()
-    };
-    let mut partial = false;
-    match config.adapter {
-        Adapter::None => return Err("未配置额度适配器".into()),
-        Adapter::Kimi => {
-            if let Some(w) = body.get("usage").and_then(|v| window(v, "周额度")) {
-                quota.windows.push(w);
-            }
-            if let Some(limits) = body.get("limits").and_then(Value::as_array) {
-                for item in limits {
-                    let duration = number(item.pointer("/window/duration"));
-                    let unit = item
-                        .pointer("/window/timeUnit")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    if duration == Some(300.0) && unit.contains("MINUTE") {
-                        if let Some(w) = item.get("detail").and_then(|v| window(v, "5 小时窗口"))
-                        {
-                            quota.windows.push(w);
-                        }
-                        break;
-                    }
-                }
-            }
-            quota.membership = body
-                .pointer("/user/membership/level")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            partial = quota.windows.len() < 2
-                || quota
-                    .windows
-                    .iter()
-                    .any(|w| w.used.is_none() || w.limit.is_none() || w.remaining.is_none());
-        }
-        Adapter::Custom => {
-            let read = |path: &str| {
-                if path.is_empty() {
-                    None
-                } else {
-                    number(body.pointer(path))
-                }
-            };
-            quota.balance = read(&config.balance_pointer);
-            let w = QuotaWindow {
-                name: "额度".into(),
-                id: "custom".into(),
-                used: read(&config.used_pointer),
-                limit: read(&config.limit_pointer),
-                remaining: read(&config.remaining_pointer),
-                reset_at: if config.reset_pointer.is_empty() {
-                    None
-                } else {
-                    body.pointer(&config.reset_pointer)
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                },
-            };
-            for (p, v) in [
-                (&config.balance_pointer, quota.balance),
-                (&config.used_pointer, w.used),
-                (&config.limit_pointer, w.limit),
-                (&config.remaining_pointer, w.remaining),
-            ] {
-                if !p.is_empty() && v.is_none() {
-                    partial = true;
-                }
-            }
-            if !config.reset_pointer.is_empty() && w.reset_at.is_none() {
-                partial = true;
-            }
-            if w.used.is_some() || w.limit.is_some() || w.remaining.is_some() {
-                quota.windows.push(w);
-            }
-        }
-    }
-    if quota.balance.is_none() && quota.windows.is_empty() {
-        return Err("响应中没有可识别的额度数值，请检查适配器或字段路径".into());
-    }
-    Ok((quota, partial))
 }
 
 fn parse_models(body: &Value) -> Result<(Vec<Model>, bool), String> {
@@ -528,21 +374,16 @@ pub async fn probe_anthropic(url: &str, key: &str, model: &str) -> ProbeResult {
     result
 }
 
-pub async fn inspect(provider: crate::data::Provider, anthropic: bool, task: Task) -> ProbeResult {
+pub async fn inspect_models(
+    provider: crate::data::Provider,
+    anthropic: bool,
+    connection_only: bool,
+) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
-    if task == Task::Quota && provider.inspection.quota.adapter == Adapter::None {
-        result.status = "skipped".into();
-        result.message = "未配置额度查询，已跳过".into();
-        return result;
-    }
     let settings = &provider.inspection;
-    let (path, leaf, auth) = if task == Task::Quota {
-        (&settings.quota.path, "usages", settings.quota.auth)
-    } else {
-        (&settings.models_path, "models", settings.models_auth)
-    };
+    let (path, leaf, auth) = (&settings.models_path, "models", settings.models_auth);
     let mut url = match endpoint(&provider.url, path, leaf) {
         Ok(url) => url,
         Err(e) => {
@@ -555,14 +396,7 @@ pub async fn inspect(provider: crate::data::Provider, anthropic: bool, task: Tas
     let mut cursors = HashSet::new();
     // Anthropic 用 after_id 分页；其他兼容接口不猜测分页协议。
     for page in 0..5 {
-        let (body, status) = match get_json(
-            url.clone(),
-            &provider.key,
-            auth,
-            anthropic && task != Task::Quota,
-        )
-        .await
-        {
+        let (body, status) = match get_json(url.clone(), &provider.key, auth, anthropic).await {
             Ok(value) => value,
             Err(e) => {
                 result.status = if result.models.is_empty() {
@@ -577,31 +411,12 @@ pub async fn inspect(provider: crate::data::Provider, anthropic: bool, task: Tas
             }
         };
         result.http_status = Some(status);
-        if task == Task::Quota {
-            match parse_quota(&body, &settings.quota) {
-                Ok((quota, partial)) => {
-                    result.quota = Some(quota);
-                    result.status = if partial { "partial" } else { "ok" }.into();
-                    result.message = if partial {
-                        "部分额度字段缺失，已展示可用数据"
-                    } else {
-                        "额度已更新"
-                    }
-                    .into();
-                }
-                Err(e) => {
-                    result.status = "error".into();
-                    result.message = e;
-                }
-            }
-            break;
-        }
         match parse_models(&body) {
             Ok((models, partial)) => {
                 if partial {
                     result.status = "partial".into();
                 }
-                if task == Task::Models {
+                if !connection_only {
                     for model in models {
                         if seen_ids.insert(model.id.clone()) {
                             result.models.push(model);
@@ -620,7 +435,7 @@ pub async fn inspect(provider: crate::data::Provider, anthropic: bool, task: Tas
                 break;
             }
         }
-        if task == Task::Connection {
+        if connection_only {
             result.message = "模型接口可达并返回 JSON；尚未验证模型生成能力".into();
             break;
         }
@@ -696,34 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn kimi_missing_values_are_not_zero() {
-        let config = QuotaSettings {
-            adapter: Adapter::Kimi,
-            ..Default::default()
-        };
-        let (q, partial) = parse_quota(&json!({"usage":{"remaining":"0","limit":"100"}, "limits":[{"window":{"duration":"300","timeUnit":"TIME_UNIT_MINUTE"},"detail":{"used":"2","limit":10,"remaining":8}}]}), &config).unwrap();
-        assert!(partial);
-        assert_eq!(q.windows[0].remaining, Some(0.0));
-        assert_eq!(q.windows[0].used, None);
-        assert_eq!(q.windows[1].remaining, Some(8.0));
-        assert!(parse_quota(&json!({}), &config).is_err());
-    }
-
-    #[test]
-    fn custom_quota_preserves_partial_fields_and_negative_balance() {
-        let config = QuotaSettings {
-            adapter: Adapter::Custom,
-            balance_pointer: "/data/balance".into(),
-            remaining_pointer: "/data/remaining".into(),
-            ..Default::default()
-        };
-        let (q, partial) = parse_quota(&json!({"data":{"balance":"-1.25"}}), &config).unwrap();
-        assert_eq!(q.balance, Some(-1.25));
-        assert!(partial);
-        assert!(parse_quota(&json!({"data":{"balance":"NaN"}}), &config).is_err());
-    }
-
-    #[test]
     fn models_accept_empty_but_reject_wrong_schema() {
         assert_eq!(parse_models(&json!({"data":[]})).unwrap(), (vec![], false));
         assert!(parse_models(&json!({"error":"bad key"})).is_err());
@@ -788,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn http_connection_uses_get_and_correct_auth_without_generation() {
         let (url, server) = mock_server(vec![(200, r#"{"data":[]}"#.into(), String::new())]);
-        let result = inspect(provider(url), false, Task::Connection).await;
+        let result = inspect_models(provider(url), false, true).await;
         assert_eq!(result.status, "ok");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /v1/models "));
@@ -809,7 +596,7 @@ mod tests {
         ]);
         let mut p = provider(url);
         p.inspection.models_auth = Auth::XApiKey;
-        let result = inspect(p, true, Task::Models).await;
+        let result = inspect_models(p, true, false).await;
         assert_eq!(result.status, "partial");
         assert_eq!(result.models[0].id, "model-1");
         assert!(!result.message.contains("fixture-token"));
@@ -834,28 +621,11 @@ mod tests {
                 r#"{"error":"fixture-token"}"#.into(),
                 headers,
             )]);
-            let result = inspect(provider(url), false, Task::Connection).await;
+            let result = inspect_models(provider(url), false, true).await;
             assert_eq!(result.status, "error");
             assert_eq!(result.http_status, Some(status));
             assert!(!result.message.contains("fixture-token"));
             assert_eq!(server.join().unwrap().len(), 1);
         }
-    }
-
-    #[tokio::test]
-    async fn quota_can_be_skipped_or_partially_returned_independently() {
-        let result = inspect(provider("http://127.0.0.1:1".into()), false, Task::Quota).await;
-        assert_eq!(result.status, "skipped");
-        let (url, server) = mock_server(vec![(
-            200,
-            r#"{"usage":{"remaining":"30"}}"#.into(),
-            String::new(),
-        )]);
-        let mut p = provider(format!("{url}/coding"));
-        p.inspection.quota.adapter = Adapter::Kimi;
-        let result = inspect(p, true, Task::Quota).await;
-        assert_eq!(result.status, "partial");
-        assert_eq!(result.quota.unwrap().windows[0].remaining, Some(30.0));
-        assert!(server.join().unwrap()[0].starts_with("GET /coding/v1/usages "));
     }
 }

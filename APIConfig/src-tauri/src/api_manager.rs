@@ -20,22 +20,8 @@ pub struct ApiAccountView {
     pub color: String,
     pub configured: bool,
     pub endpoints: Vec<ApiEndpointView>,
-    pub quota_adapter: String,
-    pub quota: ApiQuotaView,
+    pub quota: crate::quota::Settings,
     pub console_url: String,
-}
-
-#[derive(Serialize, Clone)]
-pub struct ApiQuotaView {
-    pub profile: String,
-    pub path: String,
-    pub auth: crate::inspection::Auth,
-    pub balance_pointer: String,
-    pub used_pointer: String,
-    pub limit_pointer: String,
-    pub remaining_pointer: String,
-    pub reset_pointer: String,
-    pub unit: String,
 }
 
 #[derive(Serialize)]
@@ -50,32 +36,6 @@ pub struct EndpointInput {
     pub url: String,
     #[serde(default)]
     pub auth: String,
-}
-
-#[derive(Deserialize, Default)]
-pub struct QuotaInput {
-    #[serde(default)]
-    pub presentation: String,
-    #[serde(default)]
-    pub profile: String,
-    #[serde(default)]
-    pub adapter: String,
-    #[serde(default)]
-    pub path: String,
-    #[serde(default)]
-    pub auth: String,
-    #[serde(default)]
-    pub balance_pointer: String,
-    #[serde(default)]
-    pub used_pointer: String,
-    #[serde(default)]
-    pub limit_pointer: String,
-    #[serde(default)]
-    pub remaining_pointer: String,
-    #[serde(default)]
-    pub reset_pointer: String,
-    #[serde(default)]
-    pub unit: String,
 }
 
 fn auth(value: &str, protocol: api_probe::Protocol) -> crate::inspection::Auth {
@@ -130,17 +90,8 @@ fn view(account: &data::ApiAccount) -> ApiAccountView {
                 auth: auth_name(endpoint.auth),
             })
             .collect(),
-        quota_adapter: account.quota.profile.clone(),
-        quota: ApiQuotaView {
+        quota: crate::quota::Settings {
             profile: account.quota.profile.clone(),
-            path: account.quota.path.clone(),
-            auth: account.quota.auth,
-            balance_pointer: account.quota.balance_pointer.clone(),
-            used_pointer: account.quota.used_pointer.clone(),
-            limit_pointer: account.quota.limit_pointer.clone(),
-            remaining_pointer: account.quota.remaining_pointer.clone(),
-            reset_pointer: account.quota.reset_pointer.clone(),
-            unit: account.quota.unit.clone(),
         },
         console_url: account.console_url.clone(),
     }
@@ -173,7 +124,7 @@ pub fn save_api_account(
     name: String,
     kind: String,
     endpoints: Vec<EndpointInput>,
-    quota: QuotaInput,
+    quota: crate::quota::Input,
     key: String,
     console_url: String,
 ) -> Result<Vec<ApiAccountView>, String> {
@@ -186,63 +137,6 @@ pub fn save_api_account(
     }
     if endpoints.is_empty() {
         return Err("至少配置一个接口协议".into());
-    }
-    let profile = if quota.profile.trim().is_empty() {
-        quota.adapter.trim().to_string()
-    } else {
-        quota.profile.trim().to_string()
-    };
-    let definitions_dir = data::data_dir(&app)?.join("definitions");
-    let registry = api_definitions::Registry::load(&definitions_dir)?;
-    let selected_definition = registry
-        .adapter(&profile)
-        .ok_or("额度适配器不存在，请刷新后重试")?;
-    let create_definition = selected_definition.kind == "custom";
-    let profile = if create_definition {
-        api_definitions::custom_profile_id(&name)
-    } else {
-        profile
-    };
-    if create_definition {
-        if registry.adapter(&profile).is_some() {
-            return Err("此账号已有同名自定义方案，请选择现有方案，或在数据目录编辑该方案".into());
-        }
-        if !matches!(quota.presentation.as_str(), "balance" | "quota") {
-            return Err("请选择余额或周期额度组件".into());
-        }
-        if quota.presentation == "balance" && quota.balance_pointer.trim().is_empty() {
-            return Err("余额组件需要余额字段路径".into());
-        }
-        if quota.presentation == "quota"
-            && [
-                quota.used_pointer.trim(),
-                quota.limit_pointer.trim(),
-                quota.remaining_pointer.trim(),
-            ]
-            .iter()
-            .all(|value| value.is_empty())
-        {
-            return Err("周期额度至少需要已用、总量或剩余字段".into());
-        }
-        if quota.path.trim().is_empty() {
-            return Err("自定义额度需要查询路径".into());
-        }
-        let pointers = [
-            quota.balance_pointer.trim(),
-            quota.used_pointer.trim(),
-            quota.limit_pointer.trim(),
-            quota.remaining_pointer.trim(),
-            quota.reset_pointer.trim(),
-        ];
-        if pointers[..4].iter().all(|pointer| pointer.is_empty()) {
-            return Err("至少配置一个余额、已用、总量或剩余字段".into());
-        }
-        if pointers
-            .iter()
-            .any(|pointer| !pointer.is_empty() && !pointer.starts_with('/'))
-        {
-            return Err("字段路径需使用 JSON Pointer，例如 /data/balance".into());
-        }
     }
     let converted: Vec<_> = endpoints
         .iter()
@@ -296,7 +190,7 @@ pub fn save_api_account(
         },
         endpoints: converted,
         quota: api_probe::ApiQuotaSettings {
-            profile: profile.clone(),
+            profile: quota.profile.clone(),
             ..Default::default()
         },
         console_url: console_url.into(),
@@ -320,22 +214,14 @@ pub fn save_api_account(
         accounts.retain(|a| a.name != original);
     }
     api_probe::validate_account(&account)?;
-    if create_definition {
-        api_definitions::write_custom_adapter(
-            &definitions_dir,
-            &profile,
+    account.quota.profile = quota
+        .save(
+            &data::data_dir(&app)?.join("definitions"),
+            &format!("api:{name}"),
             &name,
-            &quota.presentation,
-            &quota.path,
-            &quota.auth,
-            &quota.balance_pointer,
-            &quota.used_pointer,
-            &quota.limit_pointer,
-            &quota.remaining_pointer,
-            &quota.reset_pointer,
-            &quota.unit,
-        )?;
-    }
+            &account.endpoints[0].url,
+        )?
+        .profile;
     accounts.push(account);
     data::save_api_accounts(&app, &accounts)?;
     views(&app)
@@ -389,7 +275,15 @@ pub async fn probe_api_account(app: AppHandle, id: String) -> Result<ApiProbeRes
         None
     } else {
         let registry = api_definitions::load_for_app(&app)?;
-        Some(api_probe::quota(&account, &registry).await)
+        Some(
+            crate::quota::query(
+                &account.endpoints[0].url,
+                &account.key,
+                &account.quota.profile,
+                &registry,
+            )
+            .await,
+        )
     };
     Ok(ApiProbeResult { model_sets, quota })
 }

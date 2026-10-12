@@ -125,7 +125,7 @@ struct SceneFile {
 impl Default for SceneFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             homes: vec![],
             providers: vec![],
         }
@@ -213,7 +213,7 @@ fn normalize_colors(providers: &mut [Provider]) -> bool {
     changed
 }
 fn validate_scene(value: &SceneFile) -> Result<(), String> {
-    if value.version != 1 {
+    if value.version != 2 {
         return Err("配置版本不受支持，请使用更新版本的 APIConfig".into());
     }
     for names in [
@@ -290,6 +290,129 @@ fn archive_legacy(dir: &Path, file: &str) -> Result<(), String> {
     fs::rename(source, target).map_err(|_| "旧配置归档失败，请检查目录权限")?;
     Ok(())
 }
+/// One-time conversion; live provider settings only contain a profile reference.
+fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFile, bool), String> {
+    use crate::{api_definitions as defs, inspection};
+    let mut raw: toml::Value = read(path)?;
+    let old_version = raw
+        .get("version")
+        .and_then(toml::Value::as_integer)
+        .unwrap_or(1);
+    if old_version != 1 {
+        return Ok((raw.try_into().map_err(|_| "场景配置格式无效")?, false));
+    }
+    if let Some(providers) = raw.get_mut("providers").and_then(toml::Value::as_array_mut) {
+        for provider in providers {
+            let name = provider
+                .get("name")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let base = provider
+                .get("url")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let Some(q) = provider
+                .get_mut("inspection")
+                .and_then(|i| i.get_mut("quota"))
+            else {
+                continue;
+            };
+            if q.get("profile").is_some() {
+                continue;
+            }
+            let text = |field: &str| {
+                q.get(field)
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let adapter = text("adapter");
+            let definitions = dir.join("definitions");
+            let id = defs::custom_profile_id(&format!("{scene}:{name}:migration"));
+            let profile = match adapter.as_str() {
+                "" | "none" => "none".to_string(),
+                "kimi" => {
+                    let registry = defs::Registry::load(&definitions)?;
+                    let mut definition = registry
+                        .adapter("quota_kimi")
+                        .ok_or("迁移需要 Kimi 额度定义")?;
+                    let resolved = inspection::endpoint(&base, &text("path"), "usages")?;
+                    let default_url = crate::quota::query_url(&base, &definition.request_path)?;
+                    if resolved == default_url
+                        && matches!(text("auth").as_str(), "" | "bearer")
+                        && text("unit").is_empty()
+                    {
+                        "quota_kimi".into()
+                    } else {
+                        definition.id = id.clone();
+                        definition.label = format!("{name} · Kimi");
+                        definition.request_path = match resolved.query() {
+                            Some(query) => format!("{}?{query}", resolved.path()),
+                            None => resolved.path().into(),
+                        };
+                        definition.request_auth = if text("auth").is_empty() {
+                            "bearer".into()
+                        } else {
+                            text("auth")
+                        };
+                        definition.default_unit = text("unit");
+                        let file = definitions.join("adapters").join(format!("{id}.toml"));
+                        if !file.exists() {
+                            write(&file, &definition)?;
+                        }
+                        id
+                    }
+                }
+                "custom" => {
+                    // Preserve declared balance and window components, including mixed old settings.
+                    let balance = text("balance_pointer");
+                    let window = ["used_pointer", "limit_pointer", "remaining_pointer"]
+                        .iter()
+                        .any(|p| !text(p).is_empty());
+                    let presentation = if balance.is_empty() {
+                        "quota"
+                    } else if window {
+                        "balance_quota"
+                    } else {
+                        "balance"
+                    };
+                    let auth = text("auth");
+                    if !definitions
+                        .join("adapters")
+                        .join(format!("{id}.toml"))
+                        .exists()
+                    {
+                        defs::write_custom_adapter(
+                            &definitions,
+                            &id,
+                            &name,
+                            presentation,
+                            &text("path"),
+                            if auth.is_empty() { "bearer" } else { &auth },
+                            &balance,
+                            &text("used_pointer"),
+                            &text("limit_pointer"),
+                            &text("remaining_pointer"),
+                            &text("reset_pointer"),
+                            &text("unit"),
+                        )?;
+                    }
+                    id
+                }
+                _ => return Err("旧额度适配器无法识别，请检查配置".into()),
+            };
+            *q = toml::Value::try_from(crate::quota::Settings { profile })
+                .map_err(|_| "无法迁移额度设置")?;
+        }
+    }
+    raw.as_table_mut()
+        .ok_or("场景配置格式无效")?
+        .insert("version".into(), toml::Value::Integer(2));
+    Ok((raw.try_into().map_err(|_| "场景配置格式无效")?, true))
+}
+
 /// 完整验证各场景后写入新布局，再把原文件移至 legacy-backup。
 pub fn prepare_dir(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|_| "无法创建数据目录")?;
@@ -299,17 +422,22 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
         (FILES[1], LEGACY[2], LEGACY[3]),
     ] {
         let exists = dir.join(file).exists();
+        let mut migrated = false;
         let mut scene = if exists {
-            read::<SceneFile>(&dir.join(file))?
+            let (scene, changed) = read_scene_migrated(&dir.join(file), dir, file)?;
+            migrated = changed;
+            scene
         } else {
             SceneFile {
                 homes: if dir.join(homes).exists() {
-                    read::<SceneFile>(&dir.join(homes))?.homes
+                    read_scene_migrated(&dir.join(homes), dir, file)?.0.homes
                 } else {
                     vec![]
                 },
                 providers: if dir.join(providers).exists() {
-                    read::<SceneFile>(&dir.join(providers))?.providers
+                    read_scene_migrated(&dir.join(providers), dir, file)?
+                        .0
+                        .providers
                 } else {
                     vec![]
                 },
@@ -318,7 +446,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
         };
         validate_scene(&scene)?;
         let colors_changed = normalize_colors(&mut scene.providers);
-        scenes.push((file, scene, !exists || colors_changed));
+        scenes.push((file, scene, !exists || colors_changed || migrated, migrated));
     }
     let kimi_exists = dir.join(KIMI_LEGACY).exists();
     let kimi: KimiFile = if kimi_exists {
@@ -500,8 +628,19 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
     }
     api.version = api_version();
     validate_api_file(&api)?;
-    for (file, scene, changed) in &scenes {
+    for (file, scene, changed, migrated) in &scenes {
         if *changed {
+            if *migrated {
+                let backup = dir.join("legacy-backup");
+                fs::create_dir_all(&backup).map_err(|_| "无法创建旧查询设置备份")?;
+                let mut target = backup.join(format!("{file}.quota-v1.bak"));
+                let mut suffix = 1;
+                while target.exists() {
+                    target = backup.join(format!("{file}.quota-v1.{suffix}.bak"));
+                    suffix += 1;
+                }
+                fs::copy(dir.join(file), target).map_err(|_| "无法备份旧查询设置")?;
+            }
             write(&dir.join(file), scene)?;
         }
     }
@@ -687,12 +826,18 @@ fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Resul
     Ok(target)
 }
 pub fn change_dir(app: &AppHandle, path: &str, mode: DirectoryMode) -> Result<(), String> {
-    switch_directory(
-        &default_dir(app)?,
-        Path::new(path.trim().trim_matches('"')),
-        mode,
-    )
-    .map(|_| ())
+    let target = Path::new(path.trim().trim_matches('"'));
+    // Old scene quota settings need the local TOML registry during migration.
+    if matches!(mode, DirectoryMode::Existing)
+        && target.is_absolute()
+        && FILES
+            .iter()
+            .chain(LEGACY.iter())
+            .any(|file| target.join(file).exists())
+    {
+        ensure_probe_definitions(app, target)?;
+    }
+    switch_directory(&default_dir(app)?, target, mode).map(|_| ())
 }
 fn load_scene(app: &AppHandle, file: &str) -> Result<SceneFile, String> {
     read(&data_dir(app)?.join(file))
@@ -768,6 +913,78 @@ mod storage_tests {
         fs::write(dir.join("claude_providers.toml"), "[[providers]]\nname='Claude provider'\nurl='https://claude.example'\nkey='fixture-claude'\n").unwrap();
         fs::write(dir.join("kimi.json"), "\u{feff}{\"name\":\"Kimi\",\"url\":\"https://api.kimi.com/coding/v1\",\"key\":\"fixture-kimi\"}").unwrap();
     }
+    #[test]
+    fn scene_quota_migration_preserves_declared_components_credentials_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let definitions = dir.path().join("definitions");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions");
+        for sub in ["adapters", "layouts"] {
+            fs::create_dir_all(definitions.join(sub)).unwrap();
+            for file in fs::read_dir(source.join(sub)).unwrap() {
+                let file = file.unwrap();
+                fs::copy(file.path(), definitions.join(sub).join(file.file_name())).unwrap();
+            }
+        }
+        let original = r#"version = 1
+[[homes]]
+name = "home"
+location = "D:/home"
+[[providers]]
+name = "Relay"
+url = "https://example.test/v1"
+key = "fixture-secret"
+[providers.inspection]
+models_path = "/my/models"
+[providers.inspection.quota]
+adapter = "custom"
+path = "/account/usage"
+auth = "x_api_key"
+balance_pointer = "/balance"
+remaining_pointer = "/left"
+unit = "USD"
+[[providers]]
+name = "Kimi"
+url = "https://api.kimi.com/coding"
+key = "fixture-kimi"
+[providers.inspection.quota]
+adapter = "kimi"
+"#;
+        fs::write(dir.path().join(FILES[0]), original).unwrap();
+        prepare_dir(dir.path()).unwrap();
+        let scene: SceneFile = read(&dir.path().join(FILES[0])).unwrap();
+        assert_eq!(scene.version, 2);
+        assert_eq!(scene.providers[0].key, "fixture-secret");
+        assert_eq!(scene.providers[0].inspection.models_path, "/my/models");
+        assert_eq!(scene.homes[0].location, "D:/home");
+        let registry = crate::api_definitions::Registry::load(&definitions).unwrap();
+        let profile = &scene.providers[0].inspection.quota.profile;
+        let definition = registry.adapter(profile).unwrap();
+        assert_eq!(definition.balance_pointer, "/balance");
+        assert_eq!(definition.windows[0].remaining_pointer, "/left");
+        assert_eq!(definition.request_auth, "x_api_key");
+        let views = registry.adapter_views();
+        let view = views.iter().find(|v| &v.id == profile).unwrap();
+        assert_eq!(
+            view.blocks
+                .iter()
+                .map(|b| b.component.as_str())
+                .collect::<Vec<_>>(),
+            ["balance_card", "quota_card"]
+        );
+        let kimi = registry
+            .adapter(&scene.providers[1].inspection.quota.profile)
+            .unwrap();
+        assert_eq!(kimi.request_path, "/coding/v1/usages");
+        let saved = fs::read(dir.path().join(FILES[0])).unwrap();
+        assert!(!String::from_utf8_lossy(&saved).contains("balance_pointer"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("legacy-backup/codex.toml.quota-v1.bak")).unwrap(),
+            original
+        );
+        prepare_dir(dir.path()).unwrap();
+        assert_eq!(fs::read(dir.path().join(FILES[0])).unwrap(), saved);
+    }
+
     #[test]
     fn migrates_all_pages_preserves_keys_settings_order_and_original_bytes() {
         let dir = tempfile::tempdir().unwrap();

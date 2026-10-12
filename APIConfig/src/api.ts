@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { State, Scene, ProbeTask, ProbeResult, InspectionSettings, ApiAccount, ApiProbeResult, ApiEndpoint, ApiQuotaSettings, ApiProbeProfile } from './types'
+import type { State, Scene, ProbeTask, ProbeResult, InspectionInput, ApiAccount, ApiProbeResult, ApiEndpoint, QuotaInput, ApiProbeProfile } from './types'
 
 export const getState = () => invoke<State>('get_state')
 
@@ -43,7 +43,7 @@ export const changeDataDir = (path: string, mode: 'copy' | 'existing') => invoke
 export const inspectProvider = (scene: Scene, name: string, task: ProbeTask) =>
   invoke<ProbeResult>('inspect_provider', { scene, name, task })
 
-export const saveInspection = (scene: Scene, name: string, settings: InspectionSettings) =>
+export const saveInspection = (scene: Scene, name: string, settings: InspectionInput) =>
   invoke<State>('save_inspection', { scene, name, settings })
 
 export const reorderItems = (scene: Scene, kind: 'providers' | 'homes', names: string[]) =>
@@ -53,7 +53,7 @@ export const getApiProbeProfiles = () => invoke<ApiProbeProfile[]>('get_api_prob
 export const getApiAccounts = () => invoke<ApiAccount[]>('get_api_accounts')
 export const getApiAccountKey = (id: string) => invoke<string>('get_api_account_key', { id })
 export const openExternalUrl = (url: string) => invoke<void>('open_external_url', { url })
-export const saveApiAccount = (originalName: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: ApiQuotaSettings, key: string, consoleUrl: string) =>
+export const saveApiAccount = (originalName: string | null, name: string, kind: 'subscription' | 'direct', endpoints: ApiEndpoint[], quota: QuotaInput, key: string, consoleUrl: string) =>
   invoke<ApiAccount[]>('save_api_account', { originalName, name, kind, endpoints, quota, key, consoleUrl })
 export const deleteApiAccount = (name: string) => invoke<ApiAccount[]>('delete_api_account', { name })
 export const reorderApiAccounts = (names: string[]) => invoke<ApiAccount[]>('reorder_api_accounts', { names })
