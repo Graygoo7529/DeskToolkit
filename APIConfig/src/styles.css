@@ -162,6 +162,9 @@ fieldset h4 { font-size: 12px; font-weight: 500; color: #c5d2eb; margin: 18px 0;
 .provider-inspection { border: 1px solid #2a364b; border-radius: 11px; overflow: hidden; }
 .probe + .probe { border-top: 1px solid #2a364b; }
 .probe summary { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 16px 14px; font-size: 12px; list-style: none; background: #192232; }
+.probe-refresh.icon-btn { width: 26px; height: 26px; min-width: 26px; opacity: .68; }
+.probe-refresh.icon-btn:hover:not(:disabled) { opacity: 1; }
+.probe-refresh.icon-btn:disabled { opacity: .34; }
 .probe summary::before { content: '›'; color: #8a99b4; transition: transform .15s; }
 .probe[open] summary::before { transform: rotate(90deg); }
 .probe-status { margin-left: auto; font-size: 10px; color: #7f8ea6; }
@@ -172,7 +175,6 @@ fieldset h4 { font-size: 12px; font-weight: 500; color: #c5d2eb; margin: 18px 0;
 .probe-body { padding: 3px 14px 15px; }
 .probe-time, .stale { font-size: 10px; line-height: 1.8; }
 .probe-time { color: #71819d; }
-.probe-actions { display: flex; gap: 8px; margin-top: 16px; }
 .model-list { list-style: none; padding: 0; max-height: 260px; overflow-y: auto; user-select: text; }
 .model-list li { padding: 9px 0; border-bottom: 1px solid #29354a; font-size: 11px; overflow-wrap: anywhere; }
 .model-list small { display: block; color: #7285a3; margin-top: 5px; }

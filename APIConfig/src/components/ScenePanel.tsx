@@ -158,7 +158,7 @@ export default function ScenePanel({ scene, state, onState, pushToast }: {
       <p className="drawer-subtitle">Provider 详情</p><div className="detail-address">{detailProvider.url}</div><div className="detail-key mono">{detailProvider.key_masked}</div>
       {profileError && <p className="form-error" role="alert">{profileError}</p>}
       <ProviderInspection color={detailProvider.color} profile={profiles.find((p) => p.id === detailProvider.inspection.quota.profile)} results={inspections.results[detailProvider.name]} busy={inspections.busy || mutating} configuredQuota={!!detailProvider.inspection.quota.profile && detailProvider.inspection.quota.profile !== 'none'}
-        onRun={(task) => { if (task === 'quota') void refreshProfiles(); void inspections.run([detailProvider.name], [task]) }} onSettings={() => setModal({ kind: 'inspection', provider: detailProvider })} />
+        onRun={(task) => { if (task === 'quota') void refreshProfiles(); void inspections.run([detailProvider.name], [task]) }} />
       <div className="drawer-actions"><button className="btn btn-ghost" disabled={mutating} onClick={() => setModal({ kind: 'provider', original: detailProvider })}>编辑 Provider</button>
         <button className="btn btn-ghost" disabled={mutating} onClick={() => setModal({ kind: 'inspection', provider: detailProvider })}>查询设置</button>
         <button className="text-btn danger" disabled={mutating} onClick={() => { setModal(null); setConfirm({ kind: 'provider', name: detailProvider.name }) }}>删除</button></div>
