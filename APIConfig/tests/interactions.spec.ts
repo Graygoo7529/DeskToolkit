@@ -18,7 +18,6 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
     const state = JSON.parse(localStorage.getItem('fixture-state') ?? JSON.stringify(initial))
     const profiles = [
       { id: 'none', kind: 'none', label: '未配置', description: '', layout_id: 'none', layout_label: '', blocks: [] },
-      { id: 'balance_custom', kind: 'custom', label: '新建查询方案', description: '', layout_id: 'balance', layout_label: '余额', blocks: [] },
       { id: 'quota_kimi', kind: 'subscription', label: '额度 [Kimi]', description: '使用当前账号地址和 Key', layout_id: 'weekly_hourly', layout_label: '订阅额度', blocks: [
         { component: 'quota_card', source: 'windows.weekly', title: '周额度' }, { component: 'quota_card', source: 'windows.five_hour', title: '5 小时窗口' },
       ] },
@@ -37,12 +36,16 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
       const providers = args.scene === 'claude' ? state.claude_providers : state.providers
       const base = () => ({ status: 'ok', message: '查询成功', checked_at: Date.now(), latency_ms: 42, http_status: 200, models: [], quota: null }) as any
       if (cmd === 'plugin:dialog|open') return controls.folder
+      if (cmd === 'inspect_data_dir') return controls.failDirectory
+        ? { status: 'invalid', message: '目录包含无法识别的内容，需要备份后初始化', path: args.path, entries: ['notes.txt'], backup_path: `${args.path}.apiconfig-backup` }
+        : { status: 'valid', message: '发现有效配置，将直接使用', path: args.path, entries: ['codex.toml', 'definitions'], backup_path: null }
       if (cmd === 'change_data_dir') {
-        if (controls.failDirectory) throw '目标目录已有配置；请选择使用已有配置'
+        if (controls.failDirectory && !args.confirmBackup) throw 'DATA_DIR_CONFIRM_REQUIRED'
         state.data_dir = args.path
-        if (args.mode === 'existing') { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; apiAccounts = [account('Saved Kimi', true)] }
+        if (args.confirmBackup) { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; apiAccounts = [account('Saved Kimi', true)] }
       }
       if (cmd === 'get_api_probe_profiles') return profiles
+      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: args.input.kind, label: args.input.label, description: '使用此账号的接口地址与 Key 查询', layout_id: 'custom_fixture_layout', layout_label: args.input.layout_label, blocks: args.input.blocks, editable: true }
       if (cmd === 'get_api_accounts') return apiAccounts
       if (cmd === 'probe_api_account') {
         await new Promise((resolve) => setTimeout(resolve, controls.delay))
@@ -208,14 +211,21 @@ test('Claude 额度设置仍可保存，目标可应用并查看配置详情', a
   let drawer = await details(page, 'Claude A')
   await drawer.getByRole('button', { name: '查询设置', exact: true }).last().click()
   const modal = page.getByRole('dialog')
-  await modal.getByLabel('额度适配器').selectOption('balance_custom')
-  await modal.getByLabel('额度接口路径').fill('/account/usage')
-  await modal.getByLabel('余额字段', { exact: true }).fill('/data/balance')
-  await modal.getByLabel('额度单位').fill('USD')
+  await modal.getByRole('button', { name: '新建额度方案' }).click()
+  const wizard = page.getByRole('dialog').filter({ hasText: '新建额度查询方案' })
+  await wizard.getByLabel('方案名称').fill('Claude 余额方案')
+  await wizard.locator('button').filter({ hasText: '账户余额' }).click()
+  await wizard.getByRole('button', { name: '下一步' }).click()
+  await wizard.getByLabel('查询路径').fill('/account/usage')
+  await wizard.getByRole('button', { name: '下一步' }).click()
+  await wizard.getByLabel('余额字段路径').fill('/data/balance')
+  await wizard.getByLabel('单位').fill('USD')
+  await wizard.getByRole('button', { name: '生成并使用' }).click()
+  await expect(wizard).toHaveCount(0)
   await modal.getByRole('button', { name: '保存查询设置' }).click()
   await expect(modal).toHaveCount(0)
   const args = await page.evaluate(() => (window as any).__fixture.calls.find((c: any) => c.cmd === 'save_inspection').args)
-  expect(args.settings.quota).toMatchObject({ profile: 'balance_custom', presentation: 'balance', path: '/account/usage', balance_pointer: '/data/balance', unit: 'USD' })
+  expect(args.settings.quota.profile).toMatch(/^custom_/)
   await page.getByRole('button', { name: 'Claude A', exact: true }).click()
   await page.getByRole('button', { name: '应用「Claude A」到「Claude Home」', exact: true }).click()
   await page.getByRole('button', { name: '查看 Claude Home 配置', exact: true }).click()
@@ -322,7 +332,7 @@ test('来源身份色贯穿已应用目标，选中与取消只改变匹配光�
   expect(await work.evaluate((el) => getComputedStyle(el, '::after').display)).toBe('none')
 })
 
-test('数据目录可选择并复制，切换即时刷新且重启保持', async ({ page }, testInfo) => {
+test('数据目录可选择并自动识别，切换即时刷新且重启保持', async ({ page }, testInfo) => {
   await fixture(page); await idle(page)
   await codex(page).getByRole('button', { name: 'Relay', exact: true }).click()
   await page.getByRole('button', { name: '数据目录设置' }).click()
@@ -331,7 +341,8 @@ test('数据目录可选择并复制，切换即时刷新且重启保持', async
   await dialog.getByRole('button', { name: '选择目录', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: '新的数据目录' })).toHaveValue('D:\\Fixtures\\Moved')
   await capture(page, testInfo, 'storage-settings.png')
-  await dialog.getByRole('button', { name: '复制并切换', exact: true }).click()
+  await expect(dialog).toContainText('发现有效配置，将直接使用')
+  await dialog.getByRole('button', { name: '使用此目录', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('button', { name: '数据目录设置' })).toHaveAttribute('title', 'D:\\Fixtures\\Moved')
   await expect(codex(page).locator('.provider-name')).toHaveText(['Kimi', 'Relay', 'Offline'])
@@ -340,17 +351,14 @@ test('数据目录可选择并复制，切换即时刷新且重启保持', async
   await expect(page.getByRole('button', { name: '数据目录设置' })).toHaveAttribute('title', 'D:\\Fixtures\\Moved')
 })
 
-test('目录冲突可修正，使用已有配置会替换场景及 Kimi 账号并停止旧队列', async ({ page }) => {
+test('无法识别的目录需确认备份后初始化', async ({ page }) => {
   await fixture(page, { delay: 500, count: 10 })
   await page.getByRole('button', { name: '数据目录设置' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByRole('button', { name: '选择目录', exact: true }).click()
   await page.evaluate(() => { (window as any).__fixture.failDirectory = true })
-  await dialog.getByRole('button', { name: '复制并切换', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('目标目录已有配置')
-  await page.evaluate(() => { (window as any).__fixture.failDirectory = false })
-  await dialog.getByRole('button', { name: '使用已有配置', exact: false }).click()
-  await dialog.getByRole('button', { name: '使用此目录', exact: true }).click()
+  await dialog.getByRole('button', { name: '选择目录', exact: true }).click()
+  await expect(dialog).toContainText('目录包含无法识别的内容，需要备份后初始化')
+  await dialog.getByRole('button', { name: '备份并初始化', exact: true }).click()
   await expect(codex(page).locator('.provider-name')).toHaveText(['Saved provider'])
   await idle(page)
   await page.getByRole('tab', { name: 'API Probe', exact: true }).click()

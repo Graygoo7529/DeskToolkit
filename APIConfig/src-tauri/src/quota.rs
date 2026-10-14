@@ -49,8 +49,8 @@ impl Input {
     pub fn save(
         &self,
         dir: &Path,
-        identity: &str,
-        label: &str,
+        _identity: &str,
+        _label: &str,
         base: &str,
     ) -> Result<Settings, String> {
         let registry = api_definitions::Registry::load(dir)?;
@@ -58,54 +58,12 @@ impl Input {
         let definition = registry
             .adapter(profile)
             .ok_or("额度方案不存在，请刷新后重试")?;
-        if definition.kind != "custom" {
-            if definition.kind != "none" {
-                query_url(base, &definition.request_path)?;
-            }
-            return Ok(Settings {
-                profile: profile.into(),
-            });
+        if definition.kind != "none" {
+            query_url(base, &definition.request_path)?;
         }
-        let id = api_definitions::custom_profile_id(identity);
-        if registry.adapter(&id).is_some() {
-            return Err("此账号已有同名自定义方案，请选择现有方案，或在数据目录编辑该方案".into());
-        }
-        if !matches!(self.presentation.as_str(), "balance" | "quota") {
-            return Err("请选择余额或周期额度组件".into());
-        }
-        if self.presentation == "balance" && self.balance_pointer.trim().is_empty() {
-            return Err("余额组件需要余额字段路径".into());
-        }
-        if self.presentation == "quota"
-            && [
-                &self.used_pointer,
-                &self.limit_pointer,
-                &self.remaining_pointer,
-            ]
-            .iter()
-            .all(|p| p.trim().is_empty())
-        {
-            return Err("周期额度至少需要已用、总量或剩余字段".into());
-        }
-        if self.path.trim().is_empty() {
-            return Err("自定义额度需要查询路径".into());
-        }
-        query_url(base, &self.path)?;
-        api_definitions::write_custom_adapter(
-            dir,
-            &id,
-            label,
-            &self.presentation,
-            &self.path,
-            &self.auth,
-            &self.balance_pointer,
-            &self.used_pointer,
-            &self.limit_pointer,
-            &self.remaining_pointer,
-            &self.reset_pointer,
-            &self.unit,
-        )?;
-        Ok(Settings { profile: id })
+        Ok(Settings {
+            profile: profile.into(),
+        })
     }
 }
 
@@ -191,12 +149,19 @@ async fn request_json(
     key: &str,
     method: &str,
     auth: inspection::Auth,
+    body: &str,
 ) -> Result<(Value, u16), String> {
     let request = match method.to_ascii_uppercase().as_str() {
-        "POST" => HTTP
-            .post(url)
-            .header("content-type", "application/json")
-            .json(&serde_json::json!({})),
+        "POST" => {
+            let value = if body.trim().is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_str(body).map_err(|_| "POST Body 不是合法 JSON")?
+            };
+            HTTP.post(url)
+                .header("content-type", "application/json")
+                .json(&value)
+        }
         _ => HTTP.get(url),
     };
     let response = with_auth(request, key, auth)
@@ -362,7 +327,15 @@ pub async fn query(
         Ok(url) => url,
         Err(error) => return result("error", error, None, start),
     };
-    match request_json(url, key, &definition.request_method, auth).await {
+    match request_json(
+        url,
+        key,
+        &definition.request_method,
+        auth,
+        &definition.request_body,
+    )
+    .await
+    {
         Ok((body, status)) => {
             let (quota, partial) = parse_definition(&body, &definition);
             let mut r = result(
@@ -388,7 +361,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn custom_editor_creates_shared_profile_and_rejects_cross_origin() {
+    fn generated_profile_is_shared_and_account_base_validates_path() {
         let dir = tempfile::tempdir().unwrap();
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions");
         for sub in ["adapters", "layouts"] {
@@ -398,35 +371,29 @@ mod tests {
                 std::fs::copy(file.path(), dir.path().join(sub).join(file.file_name())).unwrap();
             }
         }
-        let mut input = Input {
-            profile: "balance_custom".into(),
-            presentation: "balance".into(),
-            path: "https://other.test/usage".into(),
-            auth: "x_api_key".into(),
+        let draft = crate::api_definitions::CustomProfileInput {
+            id: "user_shared_balance".into(),
+            label: "共享余额".into(),
+            kind: "balance".into(),
+            layout_id: "user_shared_balance_layout".into(),
+            layout_label: "余额".into(),
+            request_method: "GET".into(),
+            request_path: "/account/usage".into(),
+            request_auth: "x_api_key".into(),
             balance_pointer: "/balance".into(),
             ..Default::default()
         };
-        assert!(input
-            .save(dir.path(), "codex:Relay", "Relay", "https://api.test/v1")
-            .is_err());
-        input.path = "/account/usage".into();
-        let saved = input
-            .save(dir.path(), "codex:Relay", "Relay", "https://api.test/v1")
-            .unwrap();
-        let reused = Input {
-            profile: saved.profile.clone(),
-            ..Default::default()
-        }
-        .save(dir.path(), "claude:Other", "Other", "https://api.test/v1")
-        .unwrap();
-        assert_eq!(saved.profile, reused.profile);
-        assert!(input
-            .save(dir.path(), "codex:Relay", "Relay", "https://api.test/v1")
-            .is_err());
-        let other = input
-            .save(dir.path(), "claude:Relay", "Relay", "https://api.test/v1")
-            .unwrap();
-        assert_ne!(saved.profile, other.profile);
+        crate::api_definitions::write_profile(dir.path(), &draft).unwrap();
+        let registry = crate::api_definitions::Registry::load(dir.path()).unwrap();
+        let profile = registry.adapter("user_shared_balance").unwrap();
+        assert_eq!(profile.request_path, "/account/usage");
+        assert!(query_url("https://api.test/v1", "https://other.test/usage").is_err());
+        assert!(query_url("https://api.test/v1", &profile.request_path).is_ok());
+        assert!(registry
+            .adapter_views()
+            .into_iter()
+            .find(|view| view.id == "user_shared_balance")
+            .is_some_and(|view| view.editable));
     }
 
     #[tokio::test]

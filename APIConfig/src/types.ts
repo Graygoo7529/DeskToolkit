@@ -91,7 +91,7 @@ export type ApiProtocol = 'openai' | 'openai_responses' | 'anthropic' | 'genai' 
 export interface ApiEndpoint { protocol: ApiProtocol; url: string; auth: Auth }
 export interface QuotaSettings { profile: string }
 export interface QuotaInput extends QuotaSettings { presentation: 'balance' | 'quota'; path: string; auth: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
-export interface ApiProbeProfile { id: string; label: string; description: string; kind: string; layout_id: string; layout_label: string; blocks: { component: string; source: string; title: string }[] }
+export interface ApiProbeProfile { id: string; label: string; description: string; kind: string; layout_id: string; layout_label: string; blocks: { component: string; source: string; title: string }[]; editable?: boolean }
 
 export interface ApiProbeResult {
   model_sets: { protocol: ApiProtocol; result: ProbeResult }[]

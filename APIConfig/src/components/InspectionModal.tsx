@@ -36,10 +36,10 @@ export default function InspectionModal({ provider, profiles, profilesError, onR
       <label className="field"><span>认证方式</span><AuthSelect value={settings.models_auth} onChange={(models_auth) => setSettings({ ...settings, models_auth })} /></label>
       <h4>额度 / 余额</h4>
       {profilesError && <div className="inline-error" role="alert">{profilesError} <button type="button" className="text-btn" onClick={onReloadProfiles}>重新加载</button></div>}
-      <QuotaSettingsEditor value={settings.quota} profiles={profiles} onChange={(quota) => setSettings((old) => ({ ...old, quota }))} />
+      <QuotaSettingsEditor value={settings.quota} profiles={profiles} onChange={(quota) => setSettings((old) => ({ ...old, quota }))} onProfileCreated={() => onReloadProfiles()} />
     </fieldset>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="modal-actions"><button className="btn btn-ghost" disabled={saving} onClick={onClose}>取消</button>
-      <button className="btn btn-primary" disabled={saving || !profiles.some((profile) => profile.id === settings.quota.profile)} onClick={save}>{saving ? '保存中…' : '保存查询设置'}</button></div>
+      <button className="btn btn-primary" disabled={saving || !settings.quota.profile.trim()} onClick={save}>{saving ? '保存中…' : '保存查询设置'}</button></div>
   </ModalShell>
 }

@@ -53,6 +53,8 @@ pub struct AdapterDefinition {
     pub request_method: String,
     pub request_path: String,
     pub request_auth: String,
+    #[serde(default)]
+    pub request_body: String,
     pub balance_pointer: String,
     pub fallback_balance_pointer: String,
     pub unit_pointer: String,
@@ -73,6 +75,37 @@ pub struct AdapterView {
     pub layout_id: String,
     pub layout_label: String,
     pub blocks: Vec<LayoutBlock>,
+    pub editable: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CustomProfileInput {
+    #[serde(default)]
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    #[serde(default)]
+    pub layout_id: String,
+    pub layout_label: String,
+    pub request_method: String,
+    pub request_path: String,
+    pub request_auth: String,
+    #[serde(default)]
+    pub request_body: String,
+    #[serde(default)]
+    pub balance_pointer: String,
+    #[serde(default)]
+    pub fallback_balance_pointer: String,
+    #[serde(default)]
+    pub unit_pointer: String,
+    #[serde(default)]
+    pub default_unit: String,
+    #[serde(default)]
+    pub membership_pointer: String,
+    #[serde(default)]
+    pub blocks: Vec<LayoutBlock>,
+    #[serde(default)]
+    pub windows: Vec<WindowDefinition>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -124,7 +157,7 @@ impl Registry {
                 .iter()
                 .find(|layout| layout.id == adapter.layout_id)
                 .ok_or_else(|| format!("适配器 {} 引用的布局不存在", adapter.id))?;
-            if adapter.kind == "none" || adapter.kind == "custom" {
+            if adapter.kind == "none" {
                 continue;
             }
             if !matches!(adapter.kind.as_str(), "balance" | "subscription") {
@@ -203,6 +236,7 @@ impl Registry {
                     layout_id: adapter.layout_id.clone(),
                     layout_label: layout.map(|item| item.label.clone()).unwrap_or_default(),
                     blocks: layout.map(|item| item.blocks.clone()).unwrap_or_default(),
+                    editable: adapter.id.starts_with("custom_") || adapter.id.starts_with("user_"),
                 }
             })
             .collect()
@@ -250,9 +284,83 @@ pub fn load_for_app(app: &AppHandle) -> Result<Registry, String> {
     Registry::load(&dir)
 }
 
-/// Create or replace a user-authored balance adapter in the selected data
-/// directory. The generated file uses the same schema as shipped profiles.
-pub fn write_custom_adapter(
+pub fn migrate_legacy_profiles(root: &Path) -> Result<(), String> {
+    let dir = root.join("adapters");
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&dir).map_err(|_| "无法读取额度适配器目录")? {
+        let path = entry.map_err(|_| "无法读取额度适配器目录")?.path();
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .map_err(|_| format!("无法读取定义文件 {}", path.display()))?;
+        let mut adapter: AdapterDefinition = toml::from_str(text.trim_start_matches('\u{feff}'))
+            .map_err(|_| format!("定义文件 {} 格式无效，请检查 TOML", path.display()))?;
+        if adapter.kind != "custom" {
+            continue;
+        }
+        if adapter.request_path.trim().is_empty()
+            || (adapter.windows.is_empty() && adapter.balance_pointer.trim().is_empty())
+        {
+            let backup_dir = root.join("legacy-backup");
+            fs::create_dir_all(&backup_dir).map_err(|_| "无法备份旧额度方案")?;
+            let name = path.file_name().ok_or("旧额度方案文件名无效")?;
+            let mut backup = backup_dir.join(name);
+            let mut suffix = 1;
+            while backup.exists() {
+                backup = backup_dir.join(format!("{}.{}.bak", name.to_string_lossy(), suffix));
+                suffix += 1;
+            }
+            fs::rename(&path, backup).map_err(|_| "无法备份旧额度方案")?;
+            continue;
+        }
+        adapter.kind = if adapter.windows.is_empty() {
+            "balance".into()
+        } else {
+            "subscription".into()
+        };
+        if adapter.layout_id.trim().is_empty() {
+            adapter.layout_id = if adapter.windows.is_empty() {
+                "balance".into()
+            } else {
+                "subscription_daily".into()
+            };
+        }
+        let normalized = toml::to_string_pretty(&adapter)
+            .map_err(|_| format!("无法迁移定义文件 {}", path.display()))?;
+        crate::data::atomic_write(&path, &normalized)?;
+    }
+    Ok(())
+}
+
+pub fn has_legacy_profiles(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root.join("adapters")) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        path.extension().is_some_and(|ext| ext == "toml")
+            && fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| {
+                    toml::from_str::<toml::Value>(text.trim_start_matches('\u{feff}')).ok()
+                })
+                .and_then(|value| {
+                    value
+                        .get("kind")
+                        .and_then(toml::Value::as_str)
+                        .map(|kind| kind == "custom")
+                })
+                .unwrap_or(false)
+    })
+}
+
+/// Convert a legacy inline quota setting into the current file based schema.
+/// This is used only while migrating old scene/API files; the runtime registry
+/// accepts only `none`, `balance`, and `subscription` definitions.
+pub fn write_migrated_profile(
     definitions_dir: &Path,
     id: &str,
     label: &str,
@@ -359,6 +467,92 @@ pub fn write_custom_adapter(
     crate::data::atomic_write(&file, &text)
 }
 
+pub fn write_profile(definitions_dir: &Path, input: &CustomProfileInput) -> Result<(), String> {
+    if !valid_id(&input.id) || !(input.id.starts_with("custom_") || input.id.starts_with("user_")) {
+        return Err("自定义方案 ID 无效".into());
+    }
+    if input.label.trim().is_empty() || !matches!(input.kind.as_str(), "balance" | "subscription") {
+        return Err("自定义方案名称或类型无效".into());
+    }
+    if !matches!(input.request_method.as_str(), "GET" | "POST")
+        || input.request_path.trim().is_empty()
+        || !matches!(input.request_auth.as_str(), "bearer" | "x_api_key" | "none")
+    {
+        return Err("查询方式、路径或认证方式无效".into());
+    }
+    if input.request_method == "GET" && !input.request_body.trim().is_empty() {
+        return Err("GET 请求不能配置 Body".into());
+    }
+    if !input.request_body.trim().is_empty() {
+        let body: serde_json::Value =
+            serde_json::from_str(&input.request_body).map_err(|_| "POST Body 必须是合法 JSON")?;
+        if !body.is_object() {
+            return Err("POST Body 顶层必须是 JSON 对象".into());
+        }
+    }
+    let layout = LayoutDefinition {
+        id: input.layout_id.trim().to_string(),
+        label: input.layout_label.trim().to_string(),
+        blocks: input.blocks.clone(),
+    };
+    let definition = AdapterDefinition {
+        id: input.id.trim().to_string(),
+        label: input.label.trim().to_string(),
+        description: "使用此账号的接口地址与 Key 查询".into(),
+        kind: input.kind.trim().to_string(),
+        layout_id: layout.id.clone(),
+        request_method: input.request_method.trim().to_string(),
+        request_path: input.request_path.trim().to_string(),
+        request_auth: input.request_auth.trim().to_string(),
+        request_body: input.request_body.trim().to_string(),
+        balance_pointer: input.balance_pointer.trim().to_string(),
+        fallback_balance_pointer: input.fallback_balance_pointer.trim().to_string(),
+        unit_pointer: input.unit_pointer.trim().to_string(),
+        default_unit: input.default_unit.trim().to_string(),
+        membership_pointer: input.membership_pointer.trim().to_string(),
+        windows: input.windows.clone(),
+        ..Default::default()
+    };
+    if definition.kind == "balance" && definition.balance_pointer.is_empty() {
+        return Err("余额方案需要余额字段路径".into());
+    }
+    if definition.kind == "subscription" && definition.windows.is_empty() {
+        return Err("额度方案至少需要一个额度窗口".into());
+    }
+    let mut registry = Registry::load(definitions_dir)?;
+    if registry.adapter(&definition.id).is_some() {
+        return Err("此自定义方案 ID 已存在".into());
+    }
+    registry.adapters.push(definition.clone());
+    registry.layouts.push(layout.clone());
+    registry.validate()?;
+    let adapters = definitions_dir.join("adapters");
+    let layouts = definitions_dir.join("layouts");
+    fs::create_dir_all(&adapters).map_err(|_| "无法创建自定义方案目录")?;
+    fs::create_dir_all(&layouts).map_err(|_| "无法创建额度布局目录")?;
+    let adapter_path = adapters.join(format!("{}.toml", definition.id));
+    let layout_path = layouts.join(format!("{}.toml", layout.id));
+    let adapter_text = toml::to_string_pretty(&definition).map_err(|_| "无法生成额度适配器")?;
+    let layout_text = toml::to_string_pretty(&layout).map_err(|_| "无法生成额度布局")?;
+    crate::data::atomic_write(&layout_path, &layout_text)?;
+    if let Err(error) = crate::data::atomic_write(&adapter_path, &adapter_text) {
+        let _ = fs::remove_file(&layout_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+pub fn new_custom_profile_id(label: &str) -> String {
+    custom_profile_id(&format!(
+        "{}:{}",
+        label,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ))
+}
+
 pub fn custom_profile_id(name: &str) -> String {
     let hash = name
         .as_bytes()
@@ -380,6 +574,27 @@ pub fn auth(value: &str) -> inspection::Auth {
 #[tauri::command]
 pub fn get_api_probe_profiles(app: AppHandle) -> Result<Vec<AdapterView>, String> {
     Ok(load_for_app(&app)?.adapter_views())
+}
+
+#[tauri::command]
+pub fn create_quota_profile(
+    app: AppHandle,
+    mut input: CustomProfileInput,
+) -> Result<AdapterView, String> {
+    let _guard = crate::data::lock()?;
+    let definitions = crate::data::data_dir(&app)?.join("definitions");
+    if input.id.trim().is_empty() {
+        input.id = new_custom_profile_id(&input.label);
+    }
+    if input.layout_id.trim().is_empty() {
+        input.layout_id = format!("{}_layout", input.id);
+    }
+    write_profile(&definitions, &input)?;
+    Registry::load(&definitions)?
+        .adapter_views()
+        .into_iter()
+        .find(|profile| profile.id == input.id)
+        .ok_or_else(|| "额度方案生成后无法读取".into())
 }
 
 #[cfg(test)]
@@ -412,7 +627,7 @@ mod tests {
     #[test]
     fn custom_files_are_loaded_and_edits_are_visible_without_recompile() {
         let dir = tempfile::tempdir().unwrap();
-        write_custom_adapter(
+        write_migrated_profile(
             dir.path(),
             "sample",
             "示例",

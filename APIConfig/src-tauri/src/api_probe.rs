@@ -59,7 +59,7 @@ pub enum QuotaAdapter {
     #[serde(rename = "quota_minimax", alias = "minimax")]
     Minimax,
     #[serde(rename = "balance_custom", alias = "custom")]
-    Custom,
+    LegacyCustom,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

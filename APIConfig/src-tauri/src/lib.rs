@@ -426,14 +426,16 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn change_data_dir(
-    app: AppHandle,
-    path: String,
-    mode: data::DirectoryMode,
-) -> Result<State, String> {
+fn change_data_dir(app: AppHandle, path: String, confirm_backup: bool) -> Result<State, String> {
     let _guard = data::lock()?;
-    data::change_dir(&app, &path, mode)?;
+    data::change_dir(&app, &path, confirm_backup)?;
     assemble(&app)
+}
+
+#[tauri::command]
+fn inspect_data_dir(app: AppHandle, path: String) -> Result<data::DirectoryReport, String> {
+    let _guard = data::lock()?;
+    data::inspect_dir(&app, &path)
 }
 
 #[derive(serde::Deserialize, Clone, Copy)]
@@ -631,11 +633,13 @@ pub fn run() {
             apply_claude_provider,
             open_data_dir,
             open_external_url,
+            inspect_data_dir,
             change_data_dir,
             inspect_provider,
             save_inspection,
             reorder_items,
             api_definitions::get_api_probe_profiles,
+            api_definitions::create_quota_profile,
             api_manager::get_api_accounts,
             api_manager::get_api_account_key,
             api_manager::save_api_account,

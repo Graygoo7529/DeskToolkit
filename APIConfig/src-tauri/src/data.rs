@@ -4,6 +4,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
 
@@ -384,7 +385,7 @@ fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFil
                         .join(format!("{id}.toml"))
                         .exists()
                     {
-                        defs::write_custom_adapter(
+                        defs::write_migrated_profile(
                             &definitions,
                             &id,
                             &name,
@@ -527,7 +528,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
                     crate::api_probe::QuotaAdapter::Zhizz => "balance_zhizz",
                     crate::api_probe::QuotaAdapter::Sub2api => "quota_sub2api",
                     crate::api_probe::QuotaAdapter::Minimax => "quota_minimax",
-                    crate::api_probe::QuotaAdapter::Custom => "balance_custom",
+                    crate::api_probe::QuotaAdapter::LegacyCustom => "balance_custom",
                     crate::api_probe::QuotaAdapter::None => "none",
                 }
                 .into();
@@ -555,7 +556,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
                     crate::inspection::Auth::XApiKey => "x_api_key",
                     crate::inspection::Auth::None => "none",
                 };
-                crate::api_definitions::write_custom_adapter(
+                crate::api_definitions::write_migrated_profile(
                     &dir.join("definitions"),
                     &id,
                     &account.name,
@@ -626,6 +627,16 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
             }
         }
     }
+    if let Ok(registry) = crate::api_definitions::Registry::load(&dir.join("definitions")) {
+        for account in &mut api.accounts {
+            if account.quota.profile == "balance_custom"
+                && registry.adapter(&account.quota.profile).is_none()
+            {
+                account.quota.profile = "none".into();
+                api_changed = true;
+            }
+        }
+    }
     api.version = api_version();
     validate_api_file(&api)?;
     for (file, scene, changed, migrated) in &scenes {
@@ -677,6 +688,7 @@ fn resolve_dir(default: &Path) -> Result<PathBuf, String> {
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = resolve_dir(&default_dir(app)?)?;
     ensure_probe_definitions(app, &dir)?;
+    crate::api_definitions::migrate_legacy_profiles(&dir.join("definitions"))?;
     prepare_dir(&dir)?;
     Ok(dir)
 }
@@ -696,6 +708,76 @@ fn copy_missing_tree(source: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+const EMBEDDED_DEFINITIONS: &[(&str, &str)] = &[
+    (
+        "adapters/deepseek.toml",
+        include_str!("../../definitions/adapters/deepseek.toml"),
+    ),
+    (
+        "adapters/kimi.toml",
+        include_str!("../../definitions/adapters/kimi.toml"),
+    ),
+    (
+        "adapters/minimax.toml",
+        include_str!("../../definitions/adapters/minimax.toml"),
+    ),
+    (
+        "adapters/moonshot.toml",
+        include_str!("../../definitions/adapters/moonshot.toml"),
+    ),
+    (
+        "adapters/none.toml",
+        include_str!("../../definitions/adapters/none.toml"),
+    ),
+    (
+        "adapters/sub2api.toml",
+        include_str!("../../definitions/adapters/sub2api.toml"),
+    ),
+    (
+        "adapters/sub2api_balance.toml",
+        include_str!("../../definitions/adapters/sub2api_balance.toml"),
+    ),
+    (
+        "adapters/sub2api_periods.toml",
+        include_str!("../../definitions/adapters/sub2api_periods.toml"),
+    ),
+    (
+        "adapters/zhizz.toml",
+        include_str!("../../definitions/adapters/zhizz.toml"),
+    ),
+    (
+        "layouts/balance.toml",
+        include_str!("../../definitions/layouts/balance.toml"),
+    ),
+    (
+        "layouts/none.toml",
+        include_str!("../../definitions/layouts/none.toml"),
+    ),
+    (
+        "layouts/subscription_daily.toml",
+        include_str!("../../definitions/layouts/subscription_daily.toml"),
+    ),
+    (
+        "layouts/subscription_daily_hourly.toml",
+        include_str!("../../definitions/layouts/subscription_daily_hourly.toml"),
+    ),
+    (
+        "layouts/subscription_periods.toml",
+        include_str!("../../definitions/layouts/subscription_periods.toml"),
+    ),
+];
+
+fn write_embedded_definitions(target: &Path) -> Result<(), String> {
+    for (relative, content) in EMBEDDED_DEFINITIONS {
+        let path = target.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|_| "无法创建内置 definitions 目录")?;
+        }
+        fs::write(path, content).map_err(|_| "无法写入内置额度定义")?;
+    }
+    Ok(())
+}
+
 /// Seed the selected data directory from packaged resources once. Files are
 /// never overwritten, so edits and custom definitions remain user-owned.
 fn ensure_probe_definitions(app: &AppHandle, dir: &Path) -> Result<(), String> {
@@ -708,113 +790,173 @@ fn ensure_probe_definitions(app: &AppHandle, dir: &Path) -> Result<(), String> {
         .resource_dir()
         .ok()
         .map(|path| path.join("definitions"));
-    let source = packaged.filter(|path| path.is_dir());
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("definitions")));
+    let source = packaged
+        .filter(|path| path.is_dir())
+        .or_else(|| sibling.filter(|path| path.is_dir()));
     #[cfg(debug_assertions)]
     let source =
         source.or_else(|| Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions")));
-    let source = source.ok_or("找不到额度定义资源，请保留 exe 旁的 definitions 目录或重新安装")?;
-    if !source.is_dir() {
-        return Err("找不到额度定义资源，请检查安装包是否完整".into());
-    }
     fs::create_dir_all(dir).map_err(|_| "无法创建数据目录")?;
     let staged = tempfile::tempdir_in(dir).map_err(|_| "无法初始化 definitions 目录")?;
-    copy_missing_tree(&source, &staged.path().join("definitions"))?;
+    if let Some(source) = source {
+        copy_missing_tree(&source, &staged.path().join("definitions"))?;
+    } else {
+        write_embedded_definitions(&staged.path().join("definitions"))?;
+    }
     fs::rename(staged.path().join("definitions"), &target)
         .map_err(|_| "无法保存 definitions 目录".to_string())
 }
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DirectoryMode {
-    Copy,
-    Existing,
+pub enum DirectoryStatus {
+    Empty,
+    Valid,
+    Legacy,
+    Invalid,
+    Current,
 }
-fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Result<PathBuf, String> {
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DirectoryReport {
+    pub status: DirectoryStatus,
+    pub message: String,
+    pub path: String,
+    pub entries: Vec<String>,
+    pub backup_path: Option<String>,
+}
+
+fn backup_name(target: &Path) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("APIConfig");
+    let base = target
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{name}.apiconfig-backup-{stamp}"));
+    if !base.exists() {
+        return base;
+    }
+    for suffix in 1..1000 {
+        let candidate = base.with_extension(format!("{suffix}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    base
+}
+
+fn directory_report(default: &Path, target: &Path) -> Result<DirectoryReport, String> {
+    if !target.exists() {
+        return Ok(DirectoryReport {
+            status: DirectoryStatus::Empty,
+            message: "目录不存在，将创建并初始化".into(),
+            path: target.display().to_string(),
+            entries: vec![],
+            backup_path: None,
+        });
+    }
+    if !target.is_dir() {
+        return Err("请选择一个本地目录".into());
+    }
+    let mut entries = fs::read_dir(target)
+        .map_err(|_| "无法读取所选目录，请检查权限")?
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    entries.sort();
+    let current = resolve_dir(default)
+        .ok()
+        .and_then(|path| canonical(&path).ok())
+        .and_then(|path| canonical(target).ok().map(|target| path == target))
+        .unwrap_or(false);
+    if current {
+        return Ok(DirectoryReport {
+            status: DirectoryStatus::Current,
+            message: "当前正在使用此目录".into(),
+            path: target.display().to_string(),
+            entries,
+            backup_path: None,
+        });
+    }
+    let known_current = FILES.iter().any(|file| target.join(file).exists());
+    let known_legacy =
+        LEGACY.iter().any(|file| target.join(file).exists()) || target.join(KIMI_LEGACY).exists();
+    let mut parse_invalid = false;
+    let mut legacy_version = false;
+    for (file, expected) in [(FILES[0], 2_u32), (FILES[1], 2_u32)] {
+        if target.join(file).exists() {
+            match read::<SceneFile>(&target.join(file)) {
+                Ok(value) if value.version == expected => {}
+                Ok(_) => legacy_version = true,
+                Err(_) => parse_invalid = true,
+            }
+        }
+    }
+    if target.join(FILES[2]).exists() {
+        match read::<ApiFile>(&target.join(FILES[2])) {
+            Ok(value) if value.version == api_version() => {}
+            Ok(_) => legacy_version = true,
+            Err(_) => parse_invalid = true,
+        }
+    }
+    if target.join("definitions").exists() {
+        if !target.join("definitions").is_dir() {
+            parse_invalid = true;
+        } else if crate::api_definitions::Registry::load(&target.join("definitions")).is_err()
+            && !crate::api_definitions::has_legacy_profiles(&target.join("definitions"))
+        {
+            parse_invalid = true;
+        } else if crate::api_definitions::has_legacy_profiles(&target.join("definitions")) {
+            legacy_version = true;
+        }
+    }
+    let status = if parse_invalid {
+        DirectoryStatus::Invalid
+    } else if known_legacy || legacy_version {
+        DirectoryStatus::Legacy
+    } else if known_current || target.join("definitions").is_dir() {
+        DirectoryStatus::Valid
+    } else if entries.is_empty() {
+        DirectoryStatus::Empty
+    } else {
+        DirectoryStatus::Invalid
+    };
+    let message = match status {
+        DirectoryStatus::Valid => "发现有效配置，将直接使用".into(),
+        DirectoryStatus::Legacy => "发现旧版配置，将自动迁移并归档旧文件".into(),
+        DirectoryStatus::Invalid => "目录包含无法识别的内容，需要备份后初始化".into(),
+        DirectoryStatus::Empty => "空目录，将创建默认配置".into(),
+        DirectoryStatus::Current => "当前正在使用此目录".into(),
+    };
+    let backup_path = if matches!(status, DirectoryStatus::Invalid) {
+        Some(backup_name(target).display().to_string())
+    } else {
+        None
+    };
+    Ok(DirectoryReport {
+        status,
+        message,
+        path: target.display().to_string(),
+        entries,
+        backup_path,
+    })
+}
+
+fn switch_directory(default: &Path, target: &Path) -> Result<PathBuf, String> {
     if !target.is_absolute() {
         return Err("请选择本地目录的绝对路径".into());
     }
     fs::create_dir_all(target).map_err(|_| "无法创建目标目录")?;
     let target = canonical(target)?;
-    let current = resolve_dir(default);
-    if current
-        .as_ref()
-        .ok()
-        .and_then(|p| canonical(p).ok())
-        .as_ref()
-        == Some(&target)
-    {
-        prepare_dir(&target)?;
-        return Ok(target);
-    }
-    match mode {
-        DirectoryMode::Copy => {
-            if target.join("definitions").exists()
-                || FILES
-                    .iter()
-                    .chain(LEGACY.iter())
-                    .any(|f| target.join(f).exists())
-            {
-                return Err("目标目录已有配置；请选择“使用已有配置”，或选择新的空目录".into());
-            }
-            let source = current?;
-            prepare_dir(&source)?;
-            let staged = tempfile::tempdir_in(&target).map_err(|_| "目标目录不可写")?;
-            for file in FILES {
-                fs::copy(source.join(file), staged.path().join(file))
-                    .map_err(|_| "复制配置失败，当前目录未改变")?;
-            }
-            if source.join("definitions").is_dir() {
-                copy_missing_tree(
-                    &source.join("definitions"),
-                    &staged.path().join("definitions"),
-                )?;
-            }
-            let mut copied = Vec::new();
-            for file in FILES {
-                let result = (|| -> Result<(), String> {
-                    let content =
-                        fs::read(staged.path().join(file)).map_err(|_| "读取复制配置失败")?;
-                    let mut temp =
-                        tempfile::NamedTempFile::new_in(&target).map_err(|_| "目标目录不可写")?;
-                    temp.write_all(&content)
-                        .and_then(|_| temp.as_file().sync_all())
-                        .map_err(|_| "复制配置失败")?;
-                    temp.persist_noclobber(target.join(file))
-                        .map_err(|_| "目标文件已存在或无法写入")?;
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    for created in copied {
-                        let _ = fs::remove_file(created);
-                    }
-                    return Err(error);
-                }
-                copied.push(target.join(file));
-            }
-            if staged.path().join("definitions").exists() {
-                if fs::rename(
-                    staged.path().join("definitions"),
-                    target.join("definitions"),
-                )
-                .is_err()
-                {
-                    for created in copied {
-                        let _ = fs::remove_file(created);
-                    }
-                    return Err("复制额度定义失败，当前数据目录未改变".into());
-                }
-            }
-        }
-        DirectoryMode::Existing => {
-            if !FILES
-                .iter()
-                .chain(LEGACY.iter())
-                .any(|f| target.join(f).exists())
-            {
-                return Err("此目录没有 APIConfig 配置；请选择“复制当前配置”".into());
-            }
-            prepare_dir(&target)?;
-        }
-    }
+    prepare_dir(&target)?;
     // 验证目标可写，最后一步才更改启动时读取的目录指针。
     tempfile::NamedTempFile::new_in(&target).map_err(|_| "目标目录不可写")?;
     fs::create_dir_all(default).map_err(|_| "无法保存数据目录设置")?;
@@ -825,19 +967,33 @@ fn switch_directory(default: &Path, target: &Path, mode: DirectoryMode) -> Resul
     atomic_write(&default.join("storage.json"), &prefs)?;
     Ok(target)
 }
-pub fn change_dir(app: &AppHandle, path: &str, mode: DirectoryMode) -> Result<(), String> {
+pub fn inspect_dir(app: &AppHandle, path: &str) -> Result<DirectoryReport, String> {
     let target = Path::new(path.trim().trim_matches('"'));
-    // Old scene quota settings need the local TOML registry during migration.
-    if matches!(mode, DirectoryMode::Existing)
-        && target.is_absolute()
-        && FILES
-            .iter()
-            .chain(LEGACY.iter())
-            .any(|file| target.join(file).exists())
-    {
-        ensure_probe_definitions(app, target)?;
+    if !target.is_absolute() {
+        return Err("请选择本地目录的绝对路径".into());
     }
-    switch_directory(&default_dir(app)?, target, mode).map(|_| ())
+    directory_report(&default_dir(app)?, target)
+}
+pub fn change_dir(app: &AppHandle, path: &str, confirm_backup: bool) -> Result<(), String> {
+    let target = Path::new(path.trim().trim_matches('"'));
+    if !target.is_absolute() {
+        return Err("请选择本地目录的绝对路径".into());
+    }
+    fs::create_dir_all(target).map_err(|_| "无法创建目标目录")?;
+    let default = default_dir(app)?;
+    let report = directory_report(&default, target)?;
+    let target = canonical(target)?;
+    if matches!(report.status, DirectoryStatus::Invalid) {
+        if !confirm_backup {
+            return Err("DATA_DIR_CONFIRM_REQUIRED".into());
+        }
+        let backup = backup_name(&target);
+        fs::rename(&target, &backup).map_err(|_| "无法备份原目录，请关闭占用文件后重试")?;
+        fs::create_dir_all(&target).map_err(|_| "无法创建新的数据目录")?;
+    }
+    ensure_probe_definitions(app, &target)?;
+    crate::api_definitions::migrate_legacy_profiles(&target.join("definitions"))?;
+    switch_directory(&default, &target).map(|_| ())
 }
 fn load_scene(app: &AppHandle, file: &str) -> Result<SceneFile, String> {
     read(&data_dir(app)?.join(file))
@@ -902,6 +1058,42 @@ pub fn save_api_accounts(app: &AppHandle, accounts: &[ApiAccount]) -> Result<(),
 #[cfg(test)]
 mod storage_tests {
     use super::*;
+
+    #[test]
+    fn embedded_definitions_form_a_valid_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        write_embedded_definitions(&dir.path().join("definitions")).unwrap();
+        assert!(crate::api_definitions::Registry::load(&dir.path().join("definitions")).is_ok());
+    }
+
+    #[test]
+    fn legacy_custom_definition_is_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let definitions = dir.path().join("definitions");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions");
+        for sub in ["adapters", "layouts"] {
+            fs::create_dir_all(definitions.join(sub)).unwrap();
+            for file in fs::read_dir(source.join(sub)).unwrap() {
+                let file = file.unwrap();
+                fs::copy(file.path(), definitions.join(sub).join(file.file_name())).unwrap();
+            }
+        }
+        fs::write(
+            definitions.join("adapters/old_custom.toml"),
+            "id = \"old_custom\"\nlabel = \"旧方案\"\ndescription = \"\"\nkind = \"custom\"\nlayout_id = \"balance\"\nrequest_method = \"GET\"\nrequest_path = \"/usage\"\nrequest_auth = \"bearer\"\nbalance_pointer = \"/balance\"\n",
+        )
+        .unwrap();
+        crate::api_definitions::migrate_legacy_profiles(&definitions).unwrap();
+        assert_eq!(
+            crate::api_definitions::Registry::load(&definitions)
+                .unwrap()
+                .adapter("old_custom")
+                .unwrap()
+                .kind,
+            "balance"
+        );
+    }
+
     fn legacy(dir: &Path) {
         fs::write(dir.join("homes.toml"), "[[homes]]\nname='Work'\nlocation='D:\\Home'\n[[homes]]\nname='Personal'\nlocation='D:\\Personal'\n").unwrap();
         fs::write(dir.join("providers.toml"), "[[providers]]\nname='Relay'\nurl='https://example.com/v1'\nkey='fixture-secret'\n[providers.inspection]\nmodels_path='/custom/models'\n[[providers]]\nname='Backup'\nurl='https://backup.example'\nkey='fixture-second'\n").unwrap();
@@ -1041,32 +1233,23 @@ adapter = "kimi"
         assert!(LEGACY.iter().all(|f| dir.path().join(f).exists()));
     }
     #[test]
-    fn copy_switch_is_persistent_and_never_overwrites_existing_configs() {
+    fn automatic_switch_initializes_empty_directory_without_copying_current_data() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
         let target = root.path().join("target");
         fs::create_dir(&source).unwrap();
-        legacy(&source);
         prepare_dir(&source).unwrap();
-        let definition = Path::new("definitions/adapters/my-provider.toml");
-        fs::create_dir_all(source.join("definitions/adapters")).unwrap();
-        fs::write(source.join(definition), "# user-owned definition").unwrap();
-        switch_directory(&source, &target, DirectoryMode::Copy).unwrap();
-        assert_eq!(
-            fs::read_to_string(target.join(definition)).unwrap(),
-            "# user-owned definition"
-        );
+        let packaged = Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions");
+        copy_missing_tree(&packaged, &target.join("definitions")).unwrap();
+        switch_directory(&source, &target).unwrap();
+        assert!(target.join(FILES[0]).exists());
+        assert!(target.join(FILES[1]).exists());
+        assert!(target.join(FILES[2]).exists());
         assert_eq!(resolve_dir(&source).unwrap(), canonical(&target).unwrap());
-        for file in FILES {
-            assert_eq!(
-                fs::read(source.join(file)).unwrap(),
-                fs::read(target.join(file)).unwrap()
-            );
-        }
         let occupied = root.path().join("occupied");
         fs::create_dir(&occupied).unwrap();
         fs::write(occupied.join("providers.toml"), "keep-me").unwrap();
-        assert!(switch_directory(&source, &occupied, DirectoryMode::Copy).is_err());
+        assert!(switch_directory(&source, &occupied).is_err());
         assert_eq!(
             fs::read_to_string(occupied.join("providers.toml")).unwrap(),
             "keep-me"
@@ -1085,7 +1268,7 @@ adapter = "kimi"
         let broken = root.path().join("broken");
         fs::create_dir(&broken).unwrap();
         fs::write(broken.join("codex.toml"), "key = fixture-secret invalid").unwrap();
-        let error = switch_directory(&source, &broken, DirectoryMode::Existing).unwrap_err();
+        let error = switch_directory(&source, &broken).unwrap_err();
         assert!(!error.contains("fixture-secret"));
         assert_eq!(resolve_dir(&source).unwrap(), source);
         atomic_write(
@@ -1097,7 +1280,7 @@ adapter = "kimi"
         )
         .unwrap();
         assert!(resolve_dir(&source).is_err());
-        switch_directory(&source, &target, DirectoryMode::Existing).unwrap();
+        switch_directory(&source, &target).unwrap();
         let scene: SceneFile = read(&resolve_dir(&source).unwrap().join(FILES[0])).unwrap();
         assert_eq!(scene.providers[0].key, "fixture-secret");
     }

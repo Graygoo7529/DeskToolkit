@@ -22,7 +22,8 @@ async function openProbe(page: Page, mode: 'daily' | 'balance' | 'missing' | 'fa
       ;(window as any).__quotaCalls.push({ cmd, args })
       if (cmd === 'get_state') return state
       if (cmd === 'get_api_accounts') return [account]
-      if (cmd === 'get_api_probe_profiles') return [profile, { id: 'balance_custom', kind: 'custom', label: '新建查询方案', description: '', layout_id: 'balance', layout_label: '余额', blocks: [] }]
+      if (cmd === 'get_api_probe_profiles') return [profile]
+      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: 'subscription', label: args.input.label, description: '使用此账号的接口地址与 Key 查询', layout_id: 'custom_fixture_layout', layout_label: '额度', blocks: [{ component: 'quota_card', source: 'windows.daily', title: '日额度' }], editable: true }
       if (cmd === 'probe_api_account') return {
         model_sets: [{ protocol: 'openai', result: { ...result, models: [{ id: 'fixture-model', name: null }] } }],
         quota: { ...result, status: mode === 'missing' ? 'partial' : mode === 'failed' ? 'error' : 'ok',
@@ -73,19 +74,26 @@ test('余额组件保留零余额，并忽略所有额度窗口', async ({ page 
   await expect(page.locator('.subscription-quota')).not.toContainText('周期额度')
 })
 
-test('新建方案先选择展示组件，再保存字段映射', async ({ page }) => {
+test('新建方案通过独立向导生成并保存字段映射', async ({ page }) => {
   await openProbe(page, 'daily')
   await page.getByRole('button', { name: '编辑账号' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.locator('select').filter({ has: page.locator('option[value="balance_custom"]') }).selectOption('balance_custom')
-  await dialog.getByLabel('展示组件').selectOption('quota')
-  await dialog.getByPlaceholder('查询路径，例如 /dashboard/billing').fill('/v1/usage')
-  await dialog.getByPlaceholder('总量 JSON Pointer（可选）').fill('/total')
-  await dialog.getByPlaceholder('剩余 JSON Pointer（可选）').fill('/remaining')
+  await dialog.getByRole('button', { name: '新建额度方案' }).click()
+  const wizard = page.getByRole('dialog').filter({ hasText: '新建额度查询方案' })
+  await wizard.getByLabel('方案名称').fill('测试自定义额度')
+  await wizard.getByRole('button', { name: '下一步' }).click()
+  await wizard.getByLabel('查询路径').fill('/v1/usage')
+  await wizard.getByRole('button', { name: '下一步' }).click()
+  await wizard.getByLabel('日额度 总量字段').fill('/total')
+  await wizard.getByLabel('日额度 剩余字段').fill('/remaining')
+  await wizard.getByRole('button', { name: '生成并使用' }).click()
+  await expect(wizard).toHaveCount(0)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  const saved = await page.evaluate(() => (window as any).__quotaCalls.find((call: any) => call.cmd === 'save_api_account').args.quota)
-  expect(saved.presentation).toBe('quota')
-  expect(saved.path).toBe('/v1/usage')
-  expect(saved.limit_pointer).toBe('/total')
+  const calls = await page.evaluate(() => (window as any).__quotaCalls)
+  const created = calls.find((call: any) => call.cmd === 'create_quota_profile')
+  expect(created.args.input.request_path).toBe('/v1/usage')
+  expect(created.args.input.windows[0].limit_pointer).toBe('/total')
+  const saved = calls.find((call: any) => call.cmd === 'save_api_account').args.quota
+  expect(saved.profile).toBe('custom_fixture')
 })
