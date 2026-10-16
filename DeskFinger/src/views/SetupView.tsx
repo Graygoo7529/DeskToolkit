@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
+import Icon from "../components/Icon";
 
 /** 首次使用：选择运行目录（项目配置、快速启动、内置文档都存放在这里） */
 export default function SetupView({ onReady }: { onReady: () => void }) {
@@ -36,7 +37,7 @@ export default function SetupView({ onReady }: { onReady: () => void }) {
   return (
     <div className="center-screen">
       <div className="setup-card">
-        <div className="setup-logo">👆</div>
+        <div className="setup-logo"><Icon name="finger" size={47} /></div>
         <h1>DeskFinger</h1>
         <p className="dim">
           用户级桌面项目启动器：为每个项目集中管理快速启动、一键启动与项目文档。

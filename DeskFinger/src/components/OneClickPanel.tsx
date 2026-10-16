@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api, dropItemName, inferKind, kindLabel, sleep, uid } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
-import { KIND_ICON, type LaunchItem, type Project } from "../types";
+import { type LaunchItem, type Project } from "../types";
+import Icon, { KindIcon } from "./Icon";
 import ItemModal from "../components/ItemModal";
 
 interface PanelProps {
@@ -79,15 +80,15 @@ export default function OneClickPanel({ project, onChange, notify }: PanelProps)
     <div className="panel">
       <div className="panel-toolbar">
         <button className="btn btn-primary" onClick={runAll} disabled={running || items.every((i) => !i.enabled)}>
-          {running ? "正在执行…" : `▶ 一键启动（${items.filter((i) => i.enabled).length} 项）`}
+          {running ? "正在执行…" : <><Icon name="play" size={13} /> 一键启动（{items.filter((i) => i.enabled).length} 项）</>}
         </button>
         <button className="btn" onClick={() => setEditor({})}>
-          ＋ 添加动作
+          <Icon name="plus" size={14} /> 添加动作
         </button>
-        <span className="dim toolbar-hint">可直接拖入文件 / 文件夹 / 程序追加，或在快速启动卡片上点「➕」加入</span>
+        <span className="dim toolbar-hint">可直接拖入文件 / 文件夹 / 程序追加，或在快速启动卡片上点「加入」</span>
       </div>
 
-      <div className={`drop-zone slim ${dragging ? "dragging" : ""}`}>📥 拖入文件即可追加为启动动作</div>
+      <div className={`drop-zone slim ${dragging ? "dragging" : ""}`}><Icon name="inbox" size={16} /> 拖入文件即可追加为启动动作</div>
 
       {items.length === 0 ? (
         <div className="empty-state small">
@@ -98,7 +99,7 @@ export default function OneClickPanel({ project, onChange, notify }: PanelProps)
           {items.map((item, index) => (
             <div key={item.id} className={`action-row ${item.enabled ? "" : "disabled"}`}>
               <span className="action-index">{index + 1}</span>
-              <span className="action-icon">{KIND_ICON[item.kind]}</span>
+              <span className="action-icon"><KindIcon kind={item.kind} size={19} /></span>
               <div className="action-info">
                 <div className="action-name">
                   {item.name}
@@ -119,19 +120,19 @@ export default function OneClickPanel({ project, onChange, notify }: PanelProps)
               </label>
               <div className="action-btns">
                 <button className="btn btn-sm" title="上移" disabled={index === 0} onClick={() => move(index, -1)}>
-                  ↑
+                  <Icon name="arrow-up" size={14} />
                 </button>
                 <button className="btn btn-sm" title="下移" disabled={index === items.length - 1} onClick={() => move(index, 1)}>
-                  ↓
+                  <Icon name="arrow-down" size={14} />
                 </button>
                 <button className="btn btn-sm btn-primary" title="立即执行" onClick={() => runItem(item)}>
-                  ▶
+                  <Icon name="play" size={13} />
                 </button>
                 <button className="btn btn-sm" title="编辑" onClick={() => setEditor({ item })}>
-                  ✎
+                  <Icon name="edit" size={13} />
                 </button>
                 <button className="btn btn-sm btn-danger-ghost" title="移除" onClick={() => update(items.filter((i) => i.id !== item.id))}>
-                  ✕
+                  <Icon name="close" size={14} />
                 </button>
               </div>
             </div>

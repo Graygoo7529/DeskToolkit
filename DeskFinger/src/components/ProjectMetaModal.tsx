@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PROJECT_COLORS, PROJECT_ICONS, type Project } from "../types";
 import Modal from "./Modal";
+import { ProjectIcon } from "./Icon";
 
 interface ProjectMetaModalProps {
   title: string;
@@ -59,7 +60,7 @@ export default function ProjectMetaModal({ title, initial, onSave, onClose }: Pr
         <div className="icon-picker">
           {PROJECT_ICONS.map((i) => (
             <button key={i} type="button" className={`icon-option ${icon === i ? "active" : ""}`} onClick={() => setIcon(i)}>
-              {i}
+              <ProjectIcon value={i} size={20} />
             </button>
           ))}
         </div>

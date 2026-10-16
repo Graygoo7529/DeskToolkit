@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { api, dropItemName, inferKind, kindLabel, uid } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
-import { KIND_ICON, type ItemKind, type LaunchItem, type Project } from "../types";
+import { type ItemKind, type LaunchItem, type Project } from "../types";
+import Icon, { KindIcon } from "./Icon";
 import ItemModal from "./ItemModal";
 import Modal from "./Modal";
 import OneClickPanel from "./OneClickPanel";
@@ -190,13 +191,13 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
   const actionButtons = (item: LaunchItem) => (
     <>
       <button className="btn btn-icon btn-sm" title="加入一键启动" onClick={() => addToOneClick(item)}>
-        ➕
+        <Icon name="plus" size={14} />
       </button>
       <button className="btn btn-icon btn-sm" title="编辑" onClick={() => setEditor({ item })}>
-        ✎
+        <Icon name="edit" size={13} />
       </button>
       <button className="btn btn-icon btn-sm btn-danger-ghost" title="移除" onClick={() => remove(item.id)}>
-        ✕
+        <Icon name="close" size={14} />
       </button>
     </>
   );
@@ -215,7 +216,7 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
       onPointerDown={(e) => startReorderDrag(e, item)}
     >
       <div className="link-top">
-        <div className="link-icon">{KIND_ICON[item.kind]}</div>
+        <div className="link-icon"><KindIcon kind={item.kind} size={23} /></div>
         <div className="link-info">
           <div className="link-name" title={item.name}>
             {item.name}
@@ -245,7 +246,7 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
       }}
       onPointerDown={(e) => startReorderDrag(e, item)}
     >
-      <span className="action-icon">{KIND_ICON[item.kind]}</span>
+      <span className="action-icon"><KindIcon kind={item.kind} size={19} /></span>
       <span className="row-name">{item.name}</span>
       <span className="row-path dim" title={item.path}>
         {item.path}
@@ -270,7 +271,7 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
   /** 一键启动配置入口：放在「手动添加」左侧，点击弹出悬浮配置列表 */
   const oneClickButton = (
     <button className="btn" onClick={() => setOneClickOpen(true)} title="配置一键启动项目">
-      ⚙ 一键启动
+      <Icon name="settings" size={14} /> 一键启动
     </button>
   );
 
@@ -280,10 +281,10 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
     <div className="panel">
       {isEmpty ? (
         <div className={`drop-zone ${dragging && !oneClickOpen ? "dragging" : ""}`}>
-          <span>📥 将文件、文件夹或应用程序（含快捷方式）拖到这里，即可添加快速启动</span>
+          <span><Icon name="inbox" size={16} /> 将文件、文件夹或应用程序（含快捷方式）拖到这里，即可添加快速启动</span>
           {oneClickButton}
           <button className="btn" onClick={() => setEditor({})}>
-            ＋ 手动添加
+            <Icon name="plus" size={14} /> 手动添加
           </button>
         </div>
       ) : (
@@ -295,10 +296,10 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
           </select>
           <div className="mode-switch">
             <button className={`btn btn-sm ${view === "cards" ? "active" : ""}`} onClick={() => setView("cards")} title="卡片视图">
-              🗂️ 卡片
+              <Icon name="grid" size={14} /> 卡片
             </button>
             <button className={`btn btn-sm ${view === "rows" ? "active" : ""}`} onClick={() => setView("rows")} title="紧凑列表视图">
-              ☰ 列表
+              <Icon name="list" size={14} /> 列表
             </button>
           </div>
           <span className="dim toolbar-hint">
@@ -309,7 +310,7 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
           <div className="spacer" />
           {oneClickButton}
           <button className="btn" onClick={() => setEditor({})}>
-            ＋ 手动添加
+            <Icon name="plus" size={14} /> 手动添加
           </button>
         </div>
       )}
@@ -321,7 +322,7 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
           return (
             <section key={k} className="group-section">
               <div className="group-header">
-                <span>{KIND_ICON[k]}</span>
+                <span><KindIcon kind={k} size={16} /></span>
                 <span>{KIND_GROUP_LABEL[k]}</span>
                 <span className="count">{group.length}</span>
               </div>
@@ -339,10 +340,10 @@ export default function QuickLaunchPanel({ project, onChange, notify }: PanelPro
         </div>
       )}
 
-      {dragging && !isEmpty && !oneClickOpen && <div className="drop-overlay">📥 松开鼠标，添加到快速启动</div>}
+      {dragging && !isEmpty && !oneClickOpen && <div className="drop-overlay"><Icon name="inbox" size={18} /> 松开鼠标，添加到快速启动</div>}
 
       {oneClickOpen && (
-        <Modal title="▶ 一键启动配置" className="wide" onClose={() => setOneClickOpen(false)}>
+        <Modal title="一键启动配置" className="wide" onClose={() => setOneClickOpen(false)}>
           <OneClickPanel project={project} onChange={onChange} notify={notify} />
         </Modal>
       )}
@@ -366,7 +367,7 @@ function DragGhost({ item, pos }: { item?: LaunchItem; pos: { x: number; y: numb
   if (!item) return null;
   return (
     <div className="drag-ghost" style={{ left: pos.x + 14, top: pos.y + 16 }}>
-      <span className="drag-ghost-icon">{KIND_ICON[item.kind]}</span>
+      <span className="drag-ghost-icon"><KindIcon kind={item.kind} size={17} /></span>
       <span className="drag-ghost-name">{item.name}</span>
     </div>
   );

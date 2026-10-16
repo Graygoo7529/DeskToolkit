@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../api";
 import Modal from "./Modal";
+import Icon from "./Icon";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -151,7 +152,7 @@ export default function DocsPanel({ projectId, notify }: DocsPanelProps) {
         </div>
         {docs.map((d) => (
           <button key={d} className={`doc-item ${d === current ? "active" : ""}`} onClick={() => selectDoc(d)}>
-            <span className="doc-item-icon">{d === "看板.md" ? "📋" : "📄"}</span>
+            <span className="doc-item-icon"><Icon name={d === "看板.md" ? "layers" : "file"} size={15} /></span>
             <span className="doc-item-name">{d}</span>
           </button>
         ))}

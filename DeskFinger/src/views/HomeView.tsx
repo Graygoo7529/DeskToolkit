@@ -4,6 +4,7 @@ import { api, sleep } from "../api";
 import type { Project } from "../types";
 import Modal from "../components/Modal";
 import ProjectMetaModal from "../components/ProjectMetaModal";
+import Icon, { ProjectIcon } from "../components/Icon";
 
 interface HomeViewProps {
   runtimeDir: string;
@@ -76,17 +77,17 @@ export default function HomeView({ runtimeDir, onOpen, onRuntimeChanged }: HomeV
   };
 
   return (
-    <div className="page">
+    <div className="page home-page">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-logo">👆</span>
+          <span className="brand-logo"><Icon name="finger" size={21} /></span>
           <span className="brand-name">DeskFinger</span>
         </div>
         <div className="runtime-dir" title={runtimeDir}>
-          <span className="dim">运行目录</span>
+          <span className="runtime-label dim">运行目录</span>
           <code>{runtimeDir}</code>
-          <button className="btn btn-sm" onClick={changeRuntimeDir}>
-            更换…
+          <button className="btn btn-icon btn-sm" onClick={changeRuntimeDir} title="更换运行目录" aria-label="更换运行目录">
+            <Icon name="settings" size={14} />
           </button>
         </div>
       </header>
@@ -95,7 +96,8 @@ export default function HomeView({ runtimeDir, onOpen, onRuntimeChanged }: HomeV
         <div className="section-head">
           <h2>我的项目</h2>
           <button className="btn btn-primary" onClick={() => setCreating(true)}>
-            ＋ 新建项目
+            <Icon name="plus" size={15} />
+            <span>新建项目</span>
           </button>
         </div>
 
@@ -104,7 +106,7 @@ export default function HomeView({ runtimeDir, onOpen, onRuntimeChanged }: HomeV
           <div className="dim pad">加载中…</div>
         ) : projects.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">🗂️</div>
+            <div className="empty-icon"><Icon name="layers" size={42} /></div>
             <p>还没有项目。点击「新建项目」创建第一个项目入口吧。</p>
           </div>
         ) : (
@@ -116,28 +118,28 @@ export default function HomeView({ runtimeDir, onOpen, onRuntimeChanged }: HomeV
                 style={{ ["--accent" as string]: p.color }}
                 onClick={() => onOpen(p.id)}
               >
-                <div className="project-icon">{p.icon}</div>
+                <div className="project-icon"><ProjectIcon value={p.icon} size={25} /></div>
                 <div className="project-name">{p.name}</div>
-                <div className="project-desc dim">{p.description || "（暂无描述）"}</div>
+                {p.description && <div className="project-desc dim">{p.description}</div>}
                 <div className="project-meta dim">
-                  <span>⚡ {p.quickLinks.length} 个快速启动</span>
-                  <span>▶ {p.oneClick.filter((i) => i.enabled).length} 项一键启动</span>
+                  <span><Icon name="bolt" size={11} /> {p.quickLinks.length} 个快速启动</span>
+                  <span><Icon name="play" size={11} /> {p.oneClick.filter((i) => i.enabled).length} 项一键启动</span>
                 </div>
                 <div className="project-actions" onClick={(e) => e.stopPropagation()}>
                   <button
-                    className="btn btn-sm btn-primary"
+                    className="btn btn-sm btn-primary project-start-button"
                     disabled={runningId === p.id || p.oneClick.every((i) => !i.enabled)}
                     title={p.oneClick.some((i) => i.enabled) ? "按顺序执行已启用的启动项" : "还没有已启用的一键启动项"}
                     onClick={() => runOneClick(p)}
                   >
-                    {runningId === p.id ? "执行中…" : "▶ 一键启动"}
+                    {runningId === p.id ? "执行中…" : <><Icon name="play" size={13} /> 启动</>}
                   </button>
                   <div className="spacer" />
-                  <button className="btn btn-sm" onClick={() => setEditing(p)}>
-                    编辑
+                  <button className="btn btn-icon btn-sm" onClick={() => setEditing(p)} title="编辑项目" aria-label="编辑项目">
+                    <Icon name="edit" size={13} />
                   </button>
-                  <button className="btn btn-sm btn-danger-ghost" onClick={() => setDeleting(p)}>
-                    删除
+                  <button className="btn btn-icon btn-sm btn-danger-ghost" onClick={() => setDeleting(p)} title="删除项目" aria-label="删除项目">
+                    <Icon name="trash" size={13} />
                   </button>
                 </div>
               </div>

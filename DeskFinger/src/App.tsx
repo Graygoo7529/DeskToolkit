@@ -36,7 +36,7 @@ export default function App() {
     return <SetupView onReady={reload} />;
   }
   return projectId ? (
-    <ProjectView projectId={projectId} onBack={() => setProjectId(null)} />
+    <ProjectView projectId={projectId} onBack={() => setProjectId(null)} onSwitchProject={setProjectId} />
   ) : (
     <HomeView runtimeDir={state.runtimeDir} onOpen={setProjectId} onRuntimeChanged={reload} />
   );

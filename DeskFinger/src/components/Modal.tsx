@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Icon from "./Icon";
 
 interface ModalProps {
   title: string;
@@ -21,7 +22,7 @@ export default function Modal({ title, onClose, children, footer, className }: M
         <div className="modal-head">
           <h3>{title}</h3>
           <button className="btn btn-icon" onClick={onClose} title="关闭">
-            ✕
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div className="modal-body">{children}</div>

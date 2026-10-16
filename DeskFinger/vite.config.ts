@@ -8,7 +8,7 @@ export default defineConfig({
   clearScreen: false,
   server: {
     // Tauri expects a fixed port in dev mode
-    port: 1420,
+    port: 1431,
     strictPort: true,
     watch: {
       // tell vite to ignore watching `src-tauri`
