@@ -498,7 +498,7 @@ async fn inspect_provider(
 #[derive(serde::Deserialize)]
 struct InspectionInput {
     models_path: String,
-    models_auth: inspection::Auth,
+    models_auth_mode: inspection::Auth,
     quota: quota::Input,
 }
 
@@ -517,7 +517,7 @@ fn save_inspection(
         .ok_or("Provider 不存在")?;
     let mut next = inspection::InspectionSettings {
         models_path: settings.models_path,
-        models_auth: settings.models_auth,
+        models_auth_mode: settings.models_auth_mode,
         quota: quota::Settings::default(),
     };
     inspection::validate(&provider.url, &next)?;

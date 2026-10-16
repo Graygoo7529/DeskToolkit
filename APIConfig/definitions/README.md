@@ -6,8 +6,8 @@
 数据目录/
   apis.toml                  # 账号、协议地址、Key、quota.profile
   definitions/
-    layouts/*.toml           # 显示什么、标题、顺序、绑定 ID
-    adapters/*.toml          # 请求路径、认证、响应字段映射
+    layouts/*.toml           # 原子布局：每个文件一张卡（hourly/daily/weekly/monthly/balance）
+    adapters/*.toml          # 请求路径、认证、响应字段映射 + 引用的布局列表
     README.md
 ```
 
@@ -15,7 +15,7 @@
 
 ## 先声明界面，再适配数据
 
-例如，只显示日额度的 `layouts/my_daily.toml`：
+例如，只显示日额度的 `layouts/my_daily.toml`（实际建议直接引用内置的 `daily` 原子布局）：
 
 ```toml
 id = "my_daily"
@@ -34,10 +34,10 @@ id = "my_service"
 label = "额度 · 我的服务"
 description = "每日额度"
 kind = "subscription"
-layout_id = "my_daily"
+layout_ids = ["my_daily"]
 request_method = "GET"
 request_path = "/v1/usage"
-request_auth = "bearer"
+request_auth_mode = "auto"
 default_unit = "USD"
 
 [[windows]]
@@ -59,7 +59,8 @@ reset_pointer = "/daily_reset_at"
 | --- | --- | --- |
 | balance_card | balance | 账户余额与单位 |
 | quota_card | windows.窗口ID | 已用、总量、剩余、进度、重置时间 |
-| membership | membership | 套餐信息；缺少文本时隐藏 |
+
+窗口 ID 使用统一词汇：`hourly`（5 小时 rolling）、`daily`、`weekly`、`monthly`，以便复用原子布局。套餐文字（`membership_pointer`）有值时自动显示，无需声明组件。
 
 blocks 的顺序就是卡片的顺序。一个布局可声明任意多个额度窗口，也可组合余额和额度；每个 source 必须能在适配器中找到对应窗口 ID。卡片标题取自布局，响应不能更改标题。
 
@@ -75,5 +76,5 @@ kind 为 balance / subscription 时分别出现在直连 / 订阅的选择范围
 
 也可直接在两个文件夹中新增 TOML。刷新账号或重新进入 API Probe 后重新读取定义，无需编译。ID 只允许字母、数字、下划线和连字符，不能重复；格式错误、未知组件、错误的布局引用都会明确报告。
 
-请求继承账号第一个协议的 Base URL 和该账号的 API Key，不在定义中再保存 Key。路径以 `/` 开头时相对于域名根目录，否则相对于 Base URL。支持同源 GET / POST；POST 可在向导中填写 JSON Body，留空时发送空对象。认证为 bearer / x_api_key / none，不跟随重定向。接口返回网页时报告路径错误，不猜测或自动切换请求地址。
+请求继承账号第一个协议的 Base URL 和该账号的 API Key，不在定义中再保存 Key。路径以 `/` 开头时相对于域名根目录，否则相对于 Base URL。支持同源 GET / POST；POST 可在向导中填写 JSON Body，留空时发送空对象。认证为 auto（额度接口用 Bearer）/ none，不跟随重定向。接口返回网页时报告路径错误，不猜测或自动切换请求地址。
 

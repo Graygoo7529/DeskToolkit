@@ -5,8 +5,7 @@ import QuotaSettingsEditor, { quotaInput } from './QuotaSettingsEditor'
 
 function AuthSelect({ value, onChange }: { value: Auth; onChange: (v: Auth) => void }) {
   return <select value={value} onChange={(e) => onChange(e.target.value as Auth)}>
-    <option value="bearer">Bearer Token（使用此 Provider 的 Key）</option>
-    <option value="x_api_key">x-api-key（使用此 Provider 的 Key）</option>
+    <option value="auto">自动（Codex 用 Bearer，Claude 用 x-api-key）</option>
     <option value="none">不发送认证</option>
   </select>
 }
@@ -33,7 +32,7 @@ export default function InspectionModal({ provider, profiles, profilesError, onR
         <input value={settings.models_path} onChange={(e) => setSettings({ ...settings, models_path: e.target.value })} placeholder="自动：Base URL + /v1/models（不重复 v1）" />
         <small className="field-hint">连接测试也读取此接口，不发起模型生成。</small>
       </label>
-      <label className="field"><span>认证方式</span><AuthSelect value={settings.models_auth} onChange={(models_auth) => setSettings({ ...settings, models_auth })} /></label>
+      <label className="field"><span>认证方式</span><AuthSelect value={settings.models_auth_mode} onChange={(models_auth_mode) => setSettings({ ...settings, models_auth_mode })} /></label>
       <h4>额度 / 余额</h4>
       {profilesError && <div className="inline-error" role="alert">{profilesError} <button type="button" className="text-btn" onClick={onReloadProfiles}>重新加载</button></div>}
       <QuotaSettingsEditor value={settings.quota} profiles={profiles} onChange={(quota) => setSettings((old) => ({ ...old, quota }))} onProfileCreated={() => onReloadProfiles()} />

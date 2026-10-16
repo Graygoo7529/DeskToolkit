@@ -20,10 +20,34 @@ static HTTP: LazyLock<Client> = LazyLock::new(|| {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Auth {
+    /// 按 [AuthTarget] 选择认证头；具体映射只在 [authorize]。
     #[default]
-    Bearer,
-    XApiKey,
+    Auto,
     None,
+}
+
+/// 认证头的选择目标。协议探测按协议，额度查询固定 Bearer。
+#[derive(Clone, Copy)]
+pub enum AuthTarget {
+    Openai,
+    Anthropic,
+    Genai,
+    Quota,
+}
+
+/// 唯一的认证头映射。`None` 不发送；`Auto` 按目标选择。
+pub fn authorize(
+    request: reqwest::RequestBuilder,
+    key: &str,
+    mode: Auth,
+    target: AuthTarget,
+) -> reqwest::RequestBuilder {
+    match (mode, target) {
+        (Auth::None, _) => request,
+        (Auth::Auto, AuthTarget::Openai | AuthTarget::Quota) => request.bearer_auth(key),
+        (Auth::Auto, AuthTarget::Anthropic) => request.header("x-api-key", key),
+        (Auth::Auto, AuthTarget::Genai) => request.header("x-goog-api-key", key),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -31,7 +55,7 @@ pub enum Auth {
 pub struct InspectionSettings {
     /// 空值自动补齐版本前缀；以 / 开头则相对于域名，否则相对于 Base URL。
     pub models_path: String,
-    pub models_auth: Auth,
+    pub models_auth_mode: Auth,
     pub quota: crate::quota::Settings,
 }
 
@@ -171,12 +195,12 @@ async fn get_json(
     auth: Auth,
     anthropic: bool,
 ) -> Result<(Value, u16), RequestError> {
-    let mut request = HTTP.get(url);
-    request = match auth {
-        Auth::Bearer => request.bearer_auth(key),
-        Auth::XApiKey => request.header("x-api-key", key),
-        Auth::None => request,
+    let target = if anthropic {
+        AuthTarget::Anthropic
+    } else {
+        AuthTarget::Openai
     };
+    let mut request = authorize(HTTP.get(url), key, auth, target);
     if anthropic {
         request = request.header("anthropic-version", "2023-06-01");
     }
@@ -226,11 +250,13 @@ async fn get_json(
     Ok((body, status))
 }
 
-async fn post_json(url: Url, key: &str, body: Value) -> Result<(Value, u16), RequestError> {
-    let mut response = HTTP
-        .post(url)
-        .bearer_auth(key)
-        .header("x-api-key", key)
+async fn post_json(
+    url: Url,
+    key: &str,
+    auth: Auth,
+    body: Value,
+) -> Result<(Value, u16), RequestError> {
+    let mut response = authorize(HTTP.post(url), key, auth, AuthTarget::Anthropic)
         .header("anthropic-version", "2023-06-01")
         .json(&body)
         .send()
@@ -280,7 +306,7 @@ async fn post_json(url: Url, key: &str, body: Value) -> Result<(Value, u16), Req
     Ok((body, status))
 }
 
-pub async fn probe_openai_model(url: &str, key: &str, model: &str) -> ProbeResult {
+pub async fn probe_openai_model(url: &str, key: &str, model: &str, auth: Auth) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
@@ -297,9 +323,7 @@ pub async fn probe_openai_model(url: &str, key: &str, model: &str) -> ProbeResul
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "ping"}]
     });
-    let response = HTTP
-        .post(endpoint)
-        .bearer_auth(key)
+    let response = authorize(HTTP.post(endpoint), key, auth, AuthTarget::Openai)
         .json(&body)
         .send()
         .await;
@@ -341,7 +365,7 @@ pub async fn probe_openai_model(url: &str, key: &str, model: &str) -> ProbeResul
 }
 
 /// Anthropic 兼容接口通常没有 GET /models，使用最多 1 个输出 token 做可用性探测。
-pub async fn probe_anthropic(url: &str, key: &str, model: &str) -> ProbeResult {
+pub async fn probe_anthropic(url: &str, key: &str, model: &str, auth: Auth) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
@@ -358,7 +382,7 @@ pub async fn probe_anthropic(url: &str, key: &str, model: &str) -> ProbeResult {
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "ping"}]
     });
-    match post_json(endpoint, key, body).await {
+    match post_json(endpoint, key, auth, body).await {
         Ok((_body, status)) => {
             result.http_status = Some(status);
             result.status = "ok".into();
@@ -383,7 +407,7 @@ pub async fn inspect_models(
     let start = Instant::now();
     let mut result = ProbeResult::new();
     let settings = &provider.inspection;
-    let (path, leaf, auth) = (&settings.models_path, "models", settings.models_auth);
+    let (path, leaf, auth) = (&settings.models_path, "models", settings.models_auth_mode);
     let mut url = match endpoint(&provider.url, path, leaf) {
         Ok(url) => url,
         Err(e) => {
@@ -595,7 +619,7 @@ mod tests {
             (429, r#"{"error":"fixture-token"}"#.into(), String::new()),
         ]);
         let mut p = provider(url);
-        p.inspection.models_auth = Auth::XApiKey;
+        p.inspection.models_auth_mode = Auth::Auto;
         let result = inspect_models(p, true, false).await;
         assert_eq!(result.status, "partial");
         assert_eq!(result.models[0].id, "model-1");

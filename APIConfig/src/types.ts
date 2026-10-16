@@ -45,10 +45,10 @@ export interface State {
 
 export type Scene = 'codex' | 'claude'
 export type ProbeTask = 'connection' | 'models' | 'quota'
-export type Auth = 'bearer' | 'x_api_key' | 'none'
+export type Auth = 'auto' | 'none'
 export interface InspectionSettings {
   models_path: string
-  models_auth: Auth
+  models_auth_mode: Auth
   quota: QuotaSettings
 }
 export type InspectionInput = Omit<InspectionSettings, 'quota'> & { quota: QuotaInput }
@@ -87,11 +87,11 @@ export interface ApiAccount {
   console_url: string
 }
 
-export type ApiProtocol = 'openai' | 'openai_responses' | 'anthropic' | 'genai' | 'vertexai'
-export interface ApiEndpoint { protocol: ApiProtocol; url: string; auth: Auth }
+export type ApiProtocol = 'openai' | 'openai_responses' | 'anthropic' | 'genai'
+export interface ApiEndpoint { protocol: ApiProtocol; url: string; auth_mode: Auth }
 export interface QuotaSettings { profile: string }
-export interface QuotaInput extends QuotaSettings { presentation: 'balance' | 'quota'; path: string; auth: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
-export interface ApiProbeProfile { id: string; label: string; description: string; kind: string; layout_id: string; layout_label: string; blocks: { component: string; source: string; title: string }[]; editable?: boolean }
+export interface QuotaInput extends QuotaSettings { presentation: 'balance' | 'quota'; path: string; auth_mode: Auth; balance_pointer: string; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; unit: string }
+export interface ApiProbeProfile { id: string; label: string; description: string; kind: string; layout_ids: string[]; layout_label: string; blocks: { component: string; source: string; title: string }[]; editable?: boolean }
 
 export interface ApiProbeResult {
   model_sets: { protocol: ApiProtocol; result: ProbeResult }[]

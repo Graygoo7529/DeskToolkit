@@ -24,7 +24,7 @@ fn version() -> u32 {
     1
 }
 fn api_version() -> u32 {
-    5
+    6
 }
 // Serialize storage reads/writes, but release before any network await.
 static STORAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -126,7 +126,7 @@ struct SceneFile {
 impl Default for SceneFile {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             homes: vec![],
             providers: vec![],
         }
@@ -214,8 +214,8 @@ fn normalize_colors(providers: &mut [Provider]) -> bool {
     changed
 }
 fn validate_scene(value: &SceneFile) -> Result<(), String> {
-    if value.version != 2 {
-        return Err("配置版本不受支持，请使用更新版本的 APIConfig".into());
+    if value.version != 3 {
+        return Err("配置版本不受支持，请备份后重新配置".into());
     }
     for names in [
         value.homes.iter().map(|h| &h.name).collect::<Vec<_>>(),
@@ -299,6 +299,9 @@ fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFil
         .get("version")
         .and_then(toml::Value::as_integer)
         .unwrap_or(1);
+    if old_version == 2 {
+        return Err("配置版本不受支持，请备份后重新配置".into());
+    }
     if old_version != 1 {
         return Ok((raw.try_into().map_err(|_| "场景配置格式无效")?, false));
     }
@@ -353,10 +356,12 @@ fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFil
                             Some(query) => format!("{}?{query}", resolved.path()),
                             None => resolved.path().into(),
                         };
-                        definition.request_auth = if text("auth").is_empty() {
-                            "bearer".into()
+                        definition.request_auth_mode = if text("auth").is_empty() {
+                            "auto".into()
+                        } else if text("auth") == "none" {
+                            "none".into()
                         } else {
-                            text("auth")
+                            "auto".into()
                         };
                         definition.default_unit = text("unit");
                         let file = definitions.join("adapters").join(format!("{id}.toml"));
@@ -391,7 +396,7 @@ fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFil
                             &name,
                             presentation,
                             &text("path"),
-                            if auth.is_empty() { "bearer" } else { &auth },
+                            if auth == "none" { "none" } else { "auto" },
                             &balance,
                             &text("used_pointer"),
                             &text("limit_pointer"),
@@ -410,7 +415,7 @@ fn read_scene_migrated(path: &Path, dir: &Path, scene: &str) -> Result<(SceneFil
     }
     raw.as_table_mut()
         .ok_or("场景配置格式无效")?
-        .insert("version".into(), toml::Value::Integer(2));
+        .insert("version".into(), toml::Value::Integer(3));
     Ok((raw.try_into().map_err(|_| "场景配置格式无效")?, true))
 }
 
@@ -551,9 +556,8 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
             if account.quota.profile == "balance_custom" {
                 let q = &account.quota;
                 let id = crate::api_definitions::custom_profile_id(&account.name);
-                let auth = match q.auth {
-                    crate::inspection::Auth::Bearer => "bearer",
-                    crate::inspection::Auth::XApiKey => "x_api_key",
+                let auth_mode = match q.auth_mode {
+                    crate::inspection::Auth::Auto => "auto",
                     crate::inspection::Auth::None => "none",
                 };
                 crate::api_definitions::write_migrated_profile(
@@ -566,7 +570,7 @@ pub fn prepare_dir(dir: &Path) -> Result<(), String> {
                         "balance"
                     },
                     &q.path,
-                    auth,
+                    auth_mode,
                     &q.balance_pointer,
                     &q.used_pointer,
                     &q.limit_pointer,
@@ -742,6 +746,10 @@ const EMBEDDED_DEFINITIONS: &[(&str, &str)] = &[
         include_str!("../../definitions/adapters/sub2api_periods.toml"),
     ),
     (
+        "adapters/quota_opencode_go.toml",
+        include_str!("../../definitions/adapters/quota_opencode_go.toml"),
+    ),
+    (
         "adapters/zhizz.toml",
         include_str!("../../definitions/adapters/zhizz.toml"),
     ),
@@ -754,16 +762,20 @@ const EMBEDDED_DEFINITIONS: &[(&str, &str)] = &[
         include_str!("../../definitions/layouts/none.toml"),
     ),
     (
-        "layouts/subscription_daily.toml",
-        include_str!("../../definitions/layouts/subscription_daily.toml"),
+        "layouts/hourly.toml",
+        include_str!("../../definitions/layouts/hourly.toml"),
     ),
     (
-        "layouts/subscription_daily_hourly.toml",
-        include_str!("../../definitions/layouts/subscription_daily_hourly.toml"),
+        "layouts/daily.toml",
+        include_str!("../../definitions/layouts/daily.toml"),
     ),
     (
-        "layouts/subscription_periods.toml",
-        include_str!("../../definitions/layouts/subscription_periods.toml"),
+        "layouts/weekly.toml",
+        include_str!("../../definitions/layouts/weekly.toml"),
+    ),
+    (
+        "layouts/monthly.toml",
+        include_str!("../../definitions/layouts/monthly.toml"),
     ),
 ];
 
@@ -891,7 +903,7 @@ fn directory_report(default: &Path, target: &Path) -> Result<DirectoryReport, St
         LEGACY.iter().any(|file| target.join(file).exists()) || target.join(KIMI_LEGACY).exists();
     let mut parse_invalid = false;
     let mut legacy_version = false;
-    for (file, expected) in [(FILES[0], 2_u32), (FILES[1], 2_u32)] {
+    for (file, expected) in [(FILES[0], 3_u32), (FILES[1], 3_u32)] {
         if target.join(file).exists() {
             match read::<SceneFile>(&target.join(file)) {
                 Ok(value) if value.version == expected => {}
@@ -1080,7 +1092,7 @@ mod storage_tests {
         }
         fs::write(
             definitions.join("adapters/old_custom.toml"),
-            "id = \"old_custom\"\nlabel = \"旧方案\"\ndescription = \"\"\nkind = \"custom\"\nlayout_id = \"balance\"\nrequest_method = \"GET\"\nrequest_path = \"/usage\"\nrequest_auth = \"bearer\"\nbalance_pointer = \"/balance\"\n",
+            "id = \"old_custom\"\nlabel = \"旧方案\"\ndescription = \"\"\nkind = \"custom\"\nlayout_ids = [\"balance\"]\nrequest_method = \"GET\"\nrequest_path = \"/usage\"\nrequest_auth_mode = \"auto\"\nbalance_pointer = \"/balance\"\n",
         )
         .unwrap();
         crate::api_definitions::migrate_legacy_profiles(&definitions).unwrap();
@@ -1144,7 +1156,7 @@ adapter = "kimi"
         fs::write(dir.path().join(FILES[0]), original).unwrap();
         prepare_dir(dir.path()).unwrap();
         let scene: SceneFile = read(&dir.path().join(FILES[0])).unwrap();
-        assert_eq!(scene.version, 2);
+        assert_eq!(scene.version, 3);
         assert_eq!(scene.providers[0].key, "fixture-secret");
         assert_eq!(scene.providers[0].inspection.models_path, "/my/models");
         assert_eq!(scene.homes[0].location, "D:/home");
@@ -1153,7 +1165,7 @@ adapter = "kimi"
         let definition = registry.adapter(profile).unwrap();
         assert_eq!(definition.balance_pointer, "/balance");
         assert_eq!(definition.windows[0].remaining_pointer, "/left");
-        assert_eq!(definition.request_auth, "x_api_key");
+        assert_eq!(definition.request_auth_mode, "auto");
         let views = registry.adapter_views();
         let view = views.iter().find(|v| &v.id == profile).unwrap();
         assert_eq!(

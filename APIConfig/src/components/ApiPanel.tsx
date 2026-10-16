@@ -12,16 +12,14 @@ const protocolLabels: Record<ApiProtocol, string> = {
   openai_responses: 'Responses',
   anthropic: 'Anthropic',
   genai: 'GenAI',
-  vertexai: 'VertexAI',
 }
 const protocolDefaults: Record<ApiProtocol, string> = {
   openai: 'https://…/v1',
   openai_responses: 'https://…/v1',
   anthropic: 'https://…/apps/anthropic',
-  genai: 'https://generativelanguage.googleapis.com/v1beta',
-  vertexai: 'https://aiplatform.googleapis.com/v1',
+  genai: 'https://opencode.ai/inference/go/google/v1beta',
 }
-const makeEndpoint = (protocol: ApiProtocol, url = ''): ApiEndpoint => ({ protocol, url, auth: protocol === 'anthropic' || protocol === 'genai' || protocol === 'vertexai' ? 'x_api_key' : 'bearer' })
+const makeEndpoint = (protocol: ApiProtocol, url = ''): ApiEndpoint => ({ protocol, url, auth_mode: 'auto' })
 function normalizeAccount(raw: ApiAccount): ApiAccount {
   const endpoints = raw.endpoints?.length ? raw.endpoints : [makeEndpoint('openai', raw.url)]
   const quota = quotaInput(raw.quota)
@@ -57,12 +55,12 @@ function ApiAccountModal({ original, profiles, onClose, onSave, onDelete, onReve
     try { setKey(await onRevealKey(original.id)); setShowKey(true) } catch (e) { setError(String(e)) } finally { setKeyLoading(false) }
   }
   const save = async () => { setSaving(true); setError(''); try { await onSave(original?.name ?? null, name, kind, endpoints.filter((e) => e.url.trim()), quota, key, consoleUrl); onClose() } catch (e) { setError(String(e)) } finally { setSaving(false) } }
-  const updateEndpoint = (index: number, patch: Partial<ApiEndpoint>) => setEndpoints((old) => old.map((item, i) => i === index ? { ...item, ...patch, auth: patch.protocol && patch.protocol !== item.protocol ? makeEndpoint(patch.protocol).auth : patch.auth ?? item.auth } : item))
+  const updateEndpoint = (index: number, patch: Partial<ApiEndpoint>) => setEndpoints((old) => old.map((item, i) => i === index ? { ...item, ...patch } : item))
   return <ModalShell title={original ? '编辑 API 账号' : '添加 API 账号'} onClose={() => !saving && onClose()}>
     <fieldset disabled={saving}>
       <label className="field"><span>账号名称</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 Token Plan / DeepSeek" /></label>
       <div className="field"><span>账号类型</span><div className="segmented-control" role="group" aria-label="账号类型"><button type="button" className={kind === 'subscription' ? 'active' : ''} aria-pressed={kind === 'subscription'} onClick={() => setKind('subscription')}>订阅</button><button type="button" className={kind === 'direct' ? 'active' : ''} aria-pressed={kind === 'direct'} onClick={() => setKind('direct')}>直连</button></div><small className="field-hint">{kind === 'subscription' ? '显示周期额度、窗口额度和会员信息。' : '显示余额或服务商提供的账户额度。'}</small></div>
-      <div className="field"><span>接口协议</span><div className="api-endpoint-editor">{endpoints.map((endpoint, index) => <div className="api-endpoint-row" key={index}><select value={endpoint.protocol} onChange={(e) => updateEndpoint(index, { protocol: e.target.value as ApiProtocol })}>{(Object.keys(protocolLabels) as ApiProtocol[]).map((protocol) => <option key={protocol} value={protocol}>{protocolLabels[protocol]}</option>)}</select><input value={endpoint.url} onChange={(e) => updateEndpoint(index, { url: e.target.value })} placeholder={protocolDefaults[endpoint.protocol]} /><select value={endpoint.auth} aria-label={`${protocolLabels[endpoint.protocol]} 认证`} onChange={(e) => updateEndpoint(index, { auth: e.target.value as ApiEndpoint['auth'] })}><option value="bearer">Bearer</option><option value="x_api_key">X-API-Key</option><option value="none">无认证</option></select>{endpoints.length > 1 && <button type="button" className="icon-btn" aria-label={`移除${protocolLabels[endpoint.protocol]}协议`} onClick={() => setEndpoints((old) => old.filter((_, i) => i !== index))}><Icon name="close" size={14} /></button>}</div>)}</div><button type="button" className="text-btn" onClick={() => setEndpoints((old) => [...old, makeEndpoint('anthropic')])}><Icon name="plus" size={13} />添加协议地址</button></div>
+      <div className="field"><span>接口协议</span><div className="api-endpoint-editor">{endpoints.map((endpoint, index) => <div className="api-endpoint-row" key={index}><select value={endpoint.protocol} onChange={(e) => updateEndpoint(index, { protocol: e.target.value as ApiProtocol })}>{(Object.keys(protocolLabels) as ApiProtocol[]).map((protocol) => <option key={protocol} value={protocol}>{protocolLabels[protocol]}</option>)}</select><input value={endpoint.url} onChange={(e) => updateEndpoint(index, { url: e.target.value })} placeholder={protocolDefaults[endpoint.protocol]} /><select value={endpoint.auth_mode} aria-label={`${protocolLabels[endpoint.protocol]} 认证`} onChange={(e) => updateEndpoint(index, { auth_mode: e.target.value as ApiEndpoint['auth_mode'] })}><option value="auto">自动</option><option value="none">无认证</option></select>{endpoints.length > 1 && <button type="button" className="icon-btn" aria-label={`移除${protocolLabels[endpoint.protocol]}协议`} onClick={() => setEndpoints((old) => old.filter((_, i) => i !== index))}><Icon name="close" size={14} /></button>}</div>)}</div><button type="button" className="text-btn" onClick={() => setEndpoints((old) => [...old, makeEndpoint('anthropic')])}><Icon name="plus" size={13} />添加协议地址</button><small className="field-hint">自动按协议选择认证头：OpenAI 系用 Bearer，Anthropic 用 x-api-key，GenAI 用 x-goog-api-key。</small></div>
       <label className="field"><span>API Key</span><div className="input-with-btn"><input aria-label="API Key" type={showKey ? 'text' : 'password'} autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={original ? '点击显示读取当前 Key，或留空保留' : '输入 API Key'} /><button type="button" className="btn btn-ghost" disabled={keyLoading} onClick={() => void revealKey()}>{keyLoading ? '读取中…' : showKey ? '隐藏' : '显示'}</button></div></label>
       <label className="field"><span>控制台地址</span><input value={consoleUrl} onChange={(e) => setConsoleUrl(e.target.value)} placeholder="可选，例如 https://…/console" /></label>
       <QuotaSettingsEditor value={quota} profiles={profiles} kind={kind} onChange={setQuota} />

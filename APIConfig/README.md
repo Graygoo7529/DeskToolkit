@@ -25,7 +25,7 @@
 
 ## API 管理
 
-API Probe 用一个账号模型保存直连或订阅类型、多个协议地址、额度适配器和控制台地址，不会把账号应用到 Codex、Claude 或其他 Agent。支持 OpenAI 兼容、OpenAI Responses、Anthropic、GenAI 和 VertexAI；刷新时按协议分别发现模型，详情中的协议胶囊切换模型集，单击模型才发起最小可用性探测。列表中的 Key 显示掩码，编辑时可点击显示并修改当前 Key。
+API Probe 用一个账号模型保存直连或订阅类型、多个协议地址、额度适配器和控制台地址，不会把账号应用到 Codex、Claude 或其他 Agent。支持 OpenAI 兼容、OpenAI Responses、Anthropic 和 GenAI；认证按协议自动选择（OpenAI 系 Bearer，Anthropic 用 x-api-key，GenAI 用 x-goog-api-key），只有公开接口才选无认证；刷新时按协议分别发现模型，详情中的协议胶囊切换模型集，单击模型才发起最小可用性探测。列表中的 Key 显示掩码，编辑时可点击显示并修改当前 Key。
 
 账号列表的小圆点表示最近一次刷新状态；控制台地址以外链图标显示，点击后交给系统浏览器打开。可拖动账号排序，列表上方的刷新会并发刷新所有已配置账号。
 
@@ -37,7 +37,7 @@ Codex、Claude 的 Provider 详情与 API Probe 共用额度卡片、查询设�
 
 Provider 的查询设置可直接选择数据目录 `definitions/adapters/` 中的方案，也可选择“新建查询方案”指定组件、接口路径和字段映射。保存会在同一目录生成独立适配器与布局 TOML，三个页面均可选用。各账号只保存方案 ID，始终使用自己的 Base URL 和 Key。
 
-默认模型地址：Base URL 补齐 `/v1/models`；已有 `/v1` 不重复添加。模型查询认证可选 Bearer、x-api-key 或不认证，Claude 模型查询还会带上 Anthropic 版本头。额度查询使用方案中声明的路径、认证方式和 GET / POST 方法，不执行模型生成，不跟随重定向。
+默认模型地址：Base URL 补齐 `/v1/models`；已有 `/v1` 不重复添加。模型查询认证按场景自动选择（Codex 用 Bearer，Claude 用 x-api-key），公开接口选无认证，Claude 模型查询还会带上 Anthropic 版本头。额度查询使用方案中声明的路径、GET / POST 方法和自动（Bearer）/无认证，不执行模型生成，不跟随重定向。
 
 查询路径以 `/` 开头时相对于域名根目录，否则相对于当前 Base URL；只允许同源 HTTP(S) 地址。自定义映射使用 JSON Pointer，如 `/data/balance`；支持数字和数字字符串，并可通过总量与已用计算剩余。详细格式见 [定义文件说明](definitions/README.md)。
 

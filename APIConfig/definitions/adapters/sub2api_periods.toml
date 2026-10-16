@@ -2,10 +2,10 @@ id = "quota_sub2api_periods"
 label = "额度 · Sub2API（日 / 周 / 月）"
 description = "固定显示日、周、月额度，复用账号的接口地址与 Key"
 kind = "subscription"
-layout_id = "subscription_periods"
+layout_ids = ["daily", "weekly", "monthly"]
 request_method = "GET"
 request_path = "/v1/usage"
-request_auth = "bearer"
+request_auth_mode = "auto"
 membership_pointer = "/planName"
 default_unit = "USD"
 

@@ -5,14 +5,14 @@ async function openProbe(page: Page, mode: 'daily' | 'balance' | 'missing' | 'fa
     const subscription = mode !== 'balance'
     const profile = {
       id: 'fixture', kind: subscription ? 'subscription' : 'balance', label: '测试方案',
-      description: '测试', layout_id: 'fixture_layout', layout_label: subscription ? '额度' : '余额',
+      description: '测试', layout_ids: ['fixture_layout'], layout_label: subscription ? '额度' : '余额',
       blocks: [{ component: subscription ? 'quota_card' : 'balance_card', source: subscription ? 'windows.daily' : 'balance', title: subscription ? '日额度' : '账户余额' }],
     }
-    const quota = { profile: 'fixture', path: '', auth: 'bearer', balance_pointer: '', used_pointer: '', limit_pointer: '', remaining_pointer: '', reset_pointer: '', unit: '' }
+    const quota = { profile: 'fixture', path: '', auth_mode: 'auto', balance_pointer: '', used_pointer: '', limit_pointer: '', remaining_pointer: '', reset_pointer: '', unit: '' }
     const account = {
       id: 'api:测试账号', name: '测试账号', kind: subscription ? 'subscription' : 'direct',
       configured: true, url: 'https://fixture.example/v1', color: '#A7B8EF', key_masked: 'test…only', console_url: '',
-      endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth: 'bearer' }],
+      endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth_mode: 'auto' }],
       quota_adapter: 'fixture', quota,
     }
     const state = { homes: [], providers: [], claude_homes: [], claude_providers: [], statuses: {}, claude_statuses: {}, data_dir: 'D:\\Fixture' }
@@ -23,7 +23,7 @@ async function openProbe(page: Page, mode: 'daily' | 'balance' | 'missing' | 'fa
       if (cmd === 'get_state') return state
       if (cmd === 'get_api_accounts') return [account]
       if (cmd === 'get_api_probe_profiles') return [profile]
-      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: 'subscription', label: args.input.label, description: '使用此账号的接口地址与 Key 查询', layout_id: 'custom_fixture_layout', layout_label: '额度', blocks: [{ component: 'quota_card', source: 'windows.daily', title: '日额度' }], editable: true }
+      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: 'subscription', label: args.input.label, description: '使用此账号的接口地址与 Key 查询', layout_ids: ['custom_fixture_layout'], layout_label: '额度', blocks: [{ component: 'quota_card', source: 'windows.daily', title: '日额度' }], editable: true }
       if (cmd === 'probe_api_account') return {
         model_sets: [{ protocol: 'openai', result: { ...result, models: [{ id: 'fixture-model', name: null }] } }],
         quota: { ...result, status: mode === 'missing' ? 'partial' : mode === 'failed' ? 'error' : 'ok',

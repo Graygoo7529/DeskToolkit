@@ -4,7 +4,7 @@ import Icon from './Icon'
 import QuotaProfileWizard from './QuotaProfileWizard'
 
 export const quotaInput = (settings?: QuotaSettings): QuotaInput => ({
-  profile: settings?.profile || 'none', presentation: 'balance', path: '', auth: 'bearer',
+  profile: settings?.profile || 'none', presentation: 'balance', path: '', auth_mode: 'auto',
   balance_pointer: '', used_pointer: '', limit_pointer: '', remaining_pointer: '', reset_pointer: '', unit: '',
 })
 

@@ -1,0 +1,7 @@
+id = "monthly"
+label = "额度"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.monthly"
+title = "月额度"

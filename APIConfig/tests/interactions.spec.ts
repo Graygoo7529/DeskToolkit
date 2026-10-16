@@ -6,7 +6,7 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 
 async function fixture(page: Page, options: { delay?: number; count?: number } = {}) {
   await page.addInitScript(({ delay, count }) => {
-    const inspection = (profile = 'none') => ({ models_path: '', models_auth: 'bearer', quota: { profile } })
+    const inspection = (profile = 'none') => ({ models_path: '', models_auth_mode: 'auto', quota: { profile } })
     const provider = (name: string, adapter = 'none') => ({ name, color: name === 'Relay' ? '#86CDB7' : '#A7B8EF', url: `https://${name.toLowerCase().replace(/ /g, '-')}.example/v1`, key_masked: 'test…only', inspection: inspection(adapter) })
     const initial = {
       homes: [{ name: 'Personal', location: 'D:\\Fixtures\\codex' }, { name: 'Work', location: 'D:\\Fixtures\\work' }, { name: 'Lab', location: 'D:\\Fixtures\\lab' }],
@@ -17,15 +17,15 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
     }
     const state = JSON.parse(localStorage.getItem('fixture-state') ?? JSON.stringify(initial))
     const profiles = [
-      { id: 'none', kind: 'none', label: '未配置', description: '', layout_id: 'none', layout_label: '', blocks: [] },
-      { id: 'quota_kimi', kind: 'subscription', label: '额度 [Kimi]', description: '使用当前账号地址和 Key', layout_id: 'weekly_hourly', layout_label: '订阅额度', blocks: [
-        { component: 'quota_card', source: 'windows.weekly', title: '周额度' }, { component: 'quota_card', source: 'windows.five_hour', title: '5 小时窗口' },
+      { id: 'none', kind: 'none', label: '未配置', description: '', layout_ids: ['none'], layout_label: '', blocks: [] },
+      { id: 'quota_kimi', kind: 'subscription', label: '额度 [Kimi]', description: '使用当前账号地址和 Key', layout_ids: ['weekly', 'hourly'], layout_label: '订阅额度', blocks: [
+        { component: 'quota_card', source: 'windows.weekly', title: '周额度' }, { component: 'quota_card', source: 'windows.hourly', title: '5 小时窗口' },
       ] },
-      { id: 'balance_deepseek', kind: 'balance', label: '余额 [DeepSeek]', description: '', layout_id: 'balance', layout_label: '账户余额', blocks: [{ component: 'balance_card', source: 'balance', title: '账户余额' }] },
+      { id: 'balance_deepseek', kind: 'balance', label: '余额 [DeepSeek]', description: '', layout_ids: ['balance'], layout_label: '账户余额', blocks: [{ component: 'balance_card', source: 'balance', title: '账户余额' }] },
     ]
     const account = (name: string, kimi = false) => ({ id: `api:${name}`, name, kind: 'subscription',
       url: 'https://fixture.example/v1', key_masked: 'fixture…only', color: '#A7B8EF', configured: true, console_url: '',
-      endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth: 'bearer' }, ...kimi ? [] : [{ protocol: 'anthropic', url: 'https://fixture.example/anthropic', auth: 'x_api_key' }]],
+      endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth_mode: 'auto' }, ...kimi ? [] : [{ protocol: 'anthropic', url: 'https://fixture.example/anthropic', auth_mode: 'auto' }]],
       quota: { profile: kimi ? 'quota_kimi' : 'none' },
     })
     let apiAccounts = [account('Token Plan'), account('Kimi Code', true)]
@@ -45,7 +45,7 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
         if (args.confirmBackup) { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; apiAccounts = [account('Saved Kimi', true)] }
       }
       if (cmd === 'get_api_probe_profiles') return profiles
-      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: args.input.kind, label: args.input.label, description: '使用此账号的接口地址与 Key 查询', layout_id: 'custom_fixture_layout', layout_label: args.input.layout_label, blocks: args.input.blocks, editable: true }
+      if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: args.input.kind, label: args.input.label, description: '使用当前账号地址和 Key', layout_ids: ['custom_fixture_layout'], layout_label: args.input.layout_label, blocks: args.input.blocks, editable: true }
       if (cmd === 'get_api_accounts') return apiAccounts
       if (cmd === 'probe_api_account') {
         await new Promise((resolve) => setTimeout(resolve, controls.delay))
@@ -53,7 +53,7 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
         const current = apiAccounts.find((a) => a.id === args.id)!
         const isKimi = current.quota.profile === 'quota_kimi'
         const models = [{ id: isKimi ? 'kimi-k2.5' : 'qwen3.7-plus', name: null }, { id: isKimi ? 'kimi-k2' : 'qwen3.6-flash', name: null }, ...isKimi ? [] : [{ id: 'glm-5.3', name: null }]]
-        return { model_sets: current.endpoints.map((ep) => ({ protocol: ep.protocol, result: { ...base(), models } })), quota: isKimi ? controls.failKimi ? { ...base(), status: 'error', message: 'HTTP 401 · 认证失败', quota: null } : { ...base(), status: controls.kimiPartial ? 'partial' : 'ok', quota: { balance: null, unit: '', membership: 'LEVEL_2', windows: [{ id: 'weekly', name: '周额度', used: controls.kimiPartial ? null : 26, limit: 100, remaining: 74, reset_at: '2026-10-05T12:00:00Z' }, ...controls.kimiPartial ? [] : [{ id: 'five_hour', name: '5 小时窗口', used: 4, limit: 100, remaining: 96, reset_at: '2026-10-02T12:00:00Z' }]] } } : null }
+        return { model_sets: current.endpoints.map((ep) => ({ protocol: ep.protocol, result: { ...base(), models } })), quota: isKimi ? controls.failKimi ? { ...base(), status: 'error', message: 'HTTP 401 · 认证失败', quota: null } : { ...base(), status: controls.kimiPartial ? 'partial' : 'ok', quota: { balance: null, unit: '', membership: 'LEVEL_2', windows: [{ id: 'weekly', name: '周额度', used: controls.kimiPartial ? null : 26, limit: 100, remaining: 74, reset_at: '2026-10-05T12:00:00Z' }, ...controls.kimiPartial ? [] : [{ id: 'hourly', name: '5 小时窗口', used: 4, limit: 100, remaining: 96, reset_at: '2026-10-02T12:00:00Z' }]] } } : null }
       }
       if (cmd === 'check_api_model') return { ...base(), message: `${args.protocol} 可用` }
       if (cmd === 'save_api_account') {

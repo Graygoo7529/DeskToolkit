@@ -42,10 +42,9 @@ export default function QuotaPanel({ profile, result, color, loading }: {
   const quota = result?.quota
   const blocks = profile?.blocks ?? []
   const cards = blocks.filter((block) => block.component === 'balance_card' || block.component === 'quota_card')
-  const memberships = blocks.filter((block) => block.component === 'membership')
   return <section className="api-quota-section">
     <div className="api-section-head"><div><span className="eyebrow">ACCOUNT USAGE</span><h4>{profile?.layout_label || '额度 / 余额'}</h4></div>
-      {quota?.membership && memberships.map((block, index) => <span key={index} className="quota-membership">{block.title} {quota.membership?.replace(/^LEVEL_/, '')}</span>)}
+      {quota?.membership && <span className="quota-membership">套餐 {quota.membership?.replace(/^LEVEL_/, '')}</span>}
     </div>
     {(result?.status === 'error' || result?.status === 'partial') && <div className={result.status === 'error' ? 'inline-error' : 'quota-notice'} role="status">{result.message}</div>}
     {cards.length > 0 ? <div className="subscription-quota-grid" aria-busy={loading}>

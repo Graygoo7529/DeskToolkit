@@ -1,6 +1,6 @@
 //! Shared quota profile references and editor input for every scene.
 use crate::{api_definitions, inspection};
-use reqwest::{Client, RequestBuilder, Url};
+use reqwest::{Client, Url};
 use serde_json::Value;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,7 +35,7 @@ pub struct Input {
     pub profile: String,
     pub presentation: String,
     pub path: String,
-    pub auth: String,
+    pub auth_mode: String,
     pub balance_pointer: String,
     pub used_pointer: String,
     pub limit_pointer: String,
@@ -86,15 +86,6 @@ fn result(
         quota: None,
     }
 }
-fn with_auth(mut request: RequestBuilder, key: &str, auth: inspection::Auth) -> RequestBuilder {
-    request = match auth {
-        inspection::Auth::Bearer => request.bearer_auth(key),
-        inspection::Auth::XApiKey => request.header("x-api-key", key),
-        inspection::Auth::None => request,
-    };
-    request
-}
-
 fn json_number(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
@@ -164,7 +155,7 @@ async fn request_json(
         }
         _ => HTTP.get(url),
     };
-    let response = with_auth(request, key, auth)
+    let response = inspection::authorize(request, key, auth, inspection::AuthTarget::Quota)
         .send()
         .await
         .map_err(|_| "请求失败，请检查网络、地址和认证设置")?;
@@ -322,7 +313,7 @@ pub async fn query(
         return result("error", "额度适配器定义不存在", None, start);
     };
     let path = definition.request_path.clone();
-    let auth = crate::api_definitions::auth(&definition.request_auth);
+    let auth = crate::api_definitions::auth(&definition.request_auth_mode);
     let url = match query_url(base, &path) {
         Ok(url) => url,
         Err(error) => return result("error", error, None, start),
@@ -379,7 +370,7 @@ mod tests {
             layout_label: "余额".into(),
             request_method: "GET".into(),
             request_path: "/account/usage".into(),
-            request_auth: "x_api_key".into(),
+            request_auth_mode: "auto".into(),
             balance_pointer: "/balance".into(),
             ..Default::default()
         };

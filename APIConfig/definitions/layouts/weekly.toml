@@ -1,0 +1,7 @@
+id = "weekly"
+label = "额度"
+
+[[blocks]]
+component = "quota_card"
+source = "windows.weekly"
+title = "周额度"

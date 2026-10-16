@@ -14,7 +14,6 @@ pub enum Protocol {
     OpenaiResponses,
     Anthropic,
     Genai,
-    Vertexai,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,20 +21,21 @@ pub struct ApiEndpoint {
     pub protocol: Protocol,
     pub url: String,
     #[serde(default)]
-    pub auth: inspection::Auth,
+    pub auth_mode: inspection::Auth,
 }
 impl ApiEndpoint {
     pub fn new(protocol: Protocol, url: &str) -> Self {
         Self {
             protocol,
             url: url.trim().into(),
-            auth: if protocol == Protocol::Anthropic {
-                inspection::Auth::XApiKey
-            } else if matches!(protocol, Protocol::Genai | Protocol::Vertexai) {
-                inspection::Auth::XApiKey
-            } else {
-                inspection::Auth::Bearer
-            },
+            auth_mode: inspection::Auth::Auto,
+        }
+    }
+    fn target(&self) -> inspection::AuthTarget {
+        match self.protocol {
+            Protocol::Openai | Protocol::OpenaiResponses => inspection::AuthTarget::Openai,
+            Protocol::Anthropic => inspection::AuthTarget::Anthropic,
+            Protocol::Genai => inspection::AuthTarget::Genai,
         }
     }
 }
@@ -72,7 +72,7 @@ pub struct ApiQuotaSettings {
     #[serde(skip_serializing)]
     pub path: String,
     #[serde(skip_serializing)]
-    pub auth: inspection::Auth,
+    pub auth_mode: inspection::Auth,
     #[serde(skip_serializing)]
     pub balance_pointer: String,
     #[serde(skip_serializing)]
@@ -108,7 +108,6 @@ pub fn protocol_name(protocol: Protocol) -> &'static str {
         Protocol::OpenaiResponses => "openai_responses",
         Protocol::Anthropic => "anthropic",
         Protocol::Genai => "genai",
-        Protocol::Vertexai => "vertexai",
     }
 }
 pub fn parse_protocol(value: &str) -> Option<Protocol> {
@@ -117,7 +116,6 @@ pub fn parse_protocol(value: &str) -> Option<Protocol> {
         "openai_responses" => Some(Protocol::OpenaiResponses),
         "anthropic" => Some(Protocol::Anthropic),
         "genai" => Some(Protocol::Genai),
-        "vertexai" => Some(Protocol::Vertexai),
         _ => None,
     }
 }
@@ -169,19 +167,9 @@ async fn get_json(
     url: Url,
     key: &str,
     auth: inspection::Auth,
-    api_key_header: Option<&str>,
+    target: inspection::AuthTarget,
 ) -> Result<(Value, u16), String> {
-    let mut request = HTTP.get(url);
-    request = if let Some(header) = api_key_header {
-        request.header(header, key)
-    } else {
-        match auth {
-            inspection::Auth::Bearer => request.bearer_auth(key),
-            inspection::Auth::XApiKey => request.header("x-api-key", key),
-            inspection::Auth::None => request,
-        }
-    };
-    let response = request
+    let response = inspection::authorize(HTTP.get(url), key, auth, target)
         .send()
         .await
         .map_err(|_| "请求失败，请检查网络、地址和认证设置")?;
@@ -242,7 +230,7 @@ pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::P
     match endpoint_config.protocol {
         Protocol::Openai | Protocol::OpenaiResponses => {
             let mut settings = inspection::InspectionSettings::default();
-            settings.models_auth = endpoint_config.auth;
+            settings.models_auth_mode = endpoint_config.auth_mode;
             let provider = data::Provider {
                 name: "probe".into(),
                 url: endpoint_config.url.clone(),
@@ -254,7 +242,7 @@ pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::P
         }
         Protocol::Anthropic => {
             let mut settings = inspection::InspectionSettings::default();
-            settings.models_auth = endpoint_config.auth;
+            settings.models_auth_mode = endpoint_config.auth_mode;
             let provider = data::Provider {
                 name: "probe".into(),
                 url: endpoint_config.url.clone(),
@@ -264,13 +252,16 @@ pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::P
             };
             inspection::inspect_models(provider, true, false).await
         }
-        Protocol::Genai | Protocol::Vertexai => match direct_leaf(&endpoint_config.url, "models") {
+        Protocol::Genai => match direct_leaf(&endpoint_config.url, "models") {
             Ok(url) => {
-                let header = (endpoint_config.protocol == Protocol::Genai
-                    || endpoint_config.protocol == Protocol::Vertexai)
-                    .then_some("x-goog-api-key")
-                    .filter(|_| endpoint_config.auth == inspection::Auth::XApiKey);
-                match get_json(url, key, endpoint_config.auth, header).await {
+                match get_json(
+                    url,
+                    key,
+                    endpoint_config.auth_mode,
+                    inspection::AuthTarget::Genai,
+                )
+                .await
+                {
                     Ok((body, status)) => {
                         let models = generic_models(&body);
                         let partial = models.is_empty()
@@ -312,10 +303,21 @@ pub async fn check(
     model: &str,
 ) -> inspection::ProbeResult {
     match endpoint_config.protocol {
-        Protocol::Openai => inspection::probe_openai_model(&endpoint_config.url, key, model).await,
-        Protocol::Anthropic => inspection::probe_anthropic(&endpoint_config.url, key, model).await,
+        Protocol::Openai => {
+            inspection::probe_openai_model(
+                &endpoint_config.url,
+                key,
+                model,
+                endpoint_config.auth_mode,
+            )
+            .await
+        }
+        Protocol::Anthropic => {
+            inspection::probe_anthropic(&endpoint_config.url, key, model, endpoint_config.auth_mode)
+                .await
+        }
         Protocol::OpenaiResponses => check_responses(endpoint_config, key, model).await,
-        Protocol::Genai | Protocol::Vertexai => check_genai(endpoint_config, key, model).await,
+        Protocol::Genai => check_genai(endpoint_config, key, model).await,
     }
 }
 async fn check_responses(ep: &ApiEndpoint, key: &str, model: &str) -> inspection::ProbeResult {
@@ -323,9 +325,7 @@ async fn check_responses(ep: &ApiEndpoint, key: &str, model: &str) -> inspection
     let Ok(url) = endpoint(&ep.url, "responses") else {
         return result("error", "Responses 地址无效", None, start);
     };
-    let response = HTTP
-        .post(url)
-        .bearer_auth(key)
+    let response = inspection::authorize(HTTP.post(url), key, ep.auth_mode, ep.target())
         .json(
             &serde_json::json!({"model":model,"input":"ping","max_output_tokens":1,"store":false}),
         )
@@ -359,13 +359,7 @@ async fn check_genai(ep: &ApiEndpoint, key: &str, model: &str) -> inspection::Pr
         model.trim_start_matches("models/")
     );
     url.set_path(&path);
-    let mut request = HTTP.post(url);
-    request = match ep.auth {
-        inspection::Auth::Bearer => request.bearer_auth(key),
-        inspection::Auth::XApiKey => request.header("x-goog-api-key", key),
-        inspection::Auth::None => request,
-    };
-    let response = request
+    let response = inspection::authorize(HTTP.post(url), key, ep.auth_mode, ep.target())
         .json(&serde_json::json!({"contents":[{"parts":[{"text":"ping"}]}],"generationConfig":{"maxOutputTokens":1}}))
         .send()
         .await;

@@ -2,4 +2,4 @@ id = "none"
 label = "不查询额度"
 description = "不请求额度或余额接口"
 kind = "none"
-layout_id = "none"
+layout_ids = ["none"]

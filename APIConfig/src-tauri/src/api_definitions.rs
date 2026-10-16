@@ -49,10 +49,12 @@ pub struct AdapterDefinition {
     pub label: String,
     pub description: String,
     pub kind: String,
-    pub layout_id: String,
+    /// 引用的原子布局 ID 列表，展示时按顺序拼接各布局的卡片。
+    #[serde(default)]
+    pub layout_ids: Vec<String>,
     pub request_method: String,
     pub request_path: String,
-    pub request_auth: String,
+    pub request_auth_mode: String,
     #[serde(default)]
     pub request_body: String,
     pub balance_pointer: String,
@@ -72,7 +74,7 @@ pub struct AdapterView {
     pub label: String,
     pub description: String,
     pub kind: String,
-    pub layout_id: String,
+    pub layout_ids: Vec<String>,
     pub layout_label: String,
     pub blocks: Vec<LayoutBlock>,
     pub editable: bool,
@@ -86,10 +88,11 @@ pub struct CustomProfileInput {
     pub kind: String,
     #[serde(default)]
     pub layout_id: String,
+    #[serde(default)]
     pub layout_label: String,
     pub request_method: String,
     pub request_path: String,
-    pub request_auth: String,
+    pub request_auth_mode: String,
     #[serde(default)]
     pub request_body: String,
     #[serde(default)]
@@ -116,8 +119,14 @@ pub struct Registry {
 
 impl Registry {
     pub fn load(root: &Path) -> Result<Self, String> {
-        let adapters = load_dir::<AdapterDefinition>(&root.join("adapters"), "adapters")?;
-        let layouts = load_dir::<LayoutDefinition>(&root.join("layouts"), "layouts")?;
+        let adapters = load_adapters(&root.join("adapters"))?;
+        let mut layouts = load_dir::<LayoutDefinition>(&root.join("layouts"), "layouts")?;
+        // 套餐不再是布局组件；旧文件里的 membership 块忽略，避免拖垮整个定义目录。
+        for layout in &mut layouts {
+            layout
+                .blocks
+                .retain(|block| block.component != "membership");
+        }
         if adapters.is_empty() {
             return Err("数据目录的 definitions/adapters 为空".into());
         }
@@ -139,7 +148,6 @@ impl Registry {
                 let valid = match block.component.as_str() {
                     "balance_card" => block.source == "balance",
                     "quota_card" => block.source.starts_with("windows.") && block.source.len() > 8,
-                    "membership" => block.source == "membership",
                     _ => false,
                 };
                 if !valid {
@@ -152,11 +160,18 @@ impl Registry {
             if !valid_id(&adapter.id) || !ids.insert(&adapter.id) {
                 return Err("适配器 ID 为空或重复，请检查 definitions/adapters".into());
             }
-            let layout = self
-                .layouts
-                .iter()
-                .find(|layout| layout.id == adapter.layout_id)
-                .ok_or_else(|| format!("适配器 {} 引用的布局不存在", adapter.id))?;
+            if adapter.layout_ids.is_empty() {
+                return Err(format!("适配器 {} 没有引用任何布局", adapter.id));
+            }
+            let mut layouts = Vec::new();
+            for layout_id in &adapter.layout_ids {
+                layouts.push(
+                    self.layouts
+                        .iter()
+                        .find(|layout| &layout.id == layout_id)
+                        .ok_or_else(|| format!("适配器 {} 引用的布局不存在", adapter.id))?,
+                );
+            }
             if adapter.kind == "none" {
                 continue;
             }
@@ -171,11 +186,11 @@ impl Registry {
             {
                 return Err(format!("适配器 {} 的请求方法或路径无效", adapter.id));
             }
-            if !matches!(
-                adapter.request_auth.as_str(),
-                "bearer" | "x_api_key" | "none"
-            ) {
-                return Err(format!("适配器 {} 的认证方式无效", adapter.id));
+            if !matches!(adapter.request_auth_mode.as_str(), "auto" | "none") {
+                return Err(format!(
+                    "适配器 {} 的认证方式无效，请使用 auto 或 none",
+                    adapter.id
+                ));
             }
             let mut window_ids = std::collections::HashSet::new();
             for window in &adapter.windows {
@@ -205,10 +220,12 @@ impl Registry {
             ] {
                 validate_pointer(pointer, &adapter.id)?;
             }
-            for block in &layout.blocks {
-                if let Some(id) = block.source.strip_prefix("windows.") {
-                    if !adapter.windows.iter().any(|window| window.id == id) {
-                        return Err(format!("适配器 {} 缺少布局需要的窗口 {id}", adapter.id));
+            for layout in &layouts {
+                for block in &layout.blocks {
+                    if let Some(id) = block.source.strip_prefix("windows.") {
+                        if !adapter.windows.iter().any(|window| window.id == id) {
+                            return Err(format!("适配器 {} 缺少布局需要的窗口 {id}", adapter.id));
+                        }
                     }
                 }
             }
@@ -224,18 +241,24 @@ impl Registry {
         self.adapters
             .iter()
             .map(|adapter| {
-                let layout = self
-                    .layouts
-                    .iter()
-                    .find(|layout| layout.id == adapter.layout_id);
+                let mut blocks = Vec::new();
+                let mut labels = Vec::new();
+                for layout_id in &adapter.layout_ids {
+                    if let Some(layout) = self.layouts.iter().find(|layout| &layout.id == layout_id)
+                    {
+                        labels.push(layout.label.clone());
+                        blocks.extend(layout.blocks.clone());
+                    }
+                }
+                labels.dedup();
                 AdapterView {
                     id: adapter.id.clone(),
                     label: adapter.label.clone(),
                     description: adapter.description.clone(),
                     kind: adapter.kind.clone(),
-                    layout_id: adapter.layout_id.clone(),
-                    layout_label: layout.map(|item| item.label.clone()).unwrap_or_default(),
-                    blocks: layout.map(|item| item.blocks.clone()).unwrap_or_default(),
+                    layout_ids: adapter.layout_ids.clone(),
+                    layout_label: labels.join(" · "),
+                    blocks,
                     editable: adapter.id.starts_with("custom_") || adapter.id.starts_with("user_"),
                 }
             })
@@ -256,6 +279,52 @@ fn validate_pointer(pointer: &str, id: &str) -> Result<(), String> {
         return Err(format!("适配器 {id} 的字段路径需使用 JSON Pointer"));
     }
     Ok(())
+}
+
+/// 把旧适配器字段改成当前结构，再做严格反序列化。
+fn parse_adapter(text: &str) -> Result<AdapterDefinition, String> {
+    let mut value: toml::Value = toml::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|_| "定义文件不是合法 TOML".to_string())?;
+    if let Some(table) = value.as_table_mut() {
+        if let Some(layout_id) = table.remove("layout_id") {
+            table
+                .entry("layout_ids")
+                .or_insert_with(|| toml::Value::Array(vec![layout_id]));
+        }
+        if let Some(auth) = table.remove("request_auth") {
+            let mode = if auth.as_str() == Some("none") {
+                "none"
+            } else {
+                "auto"
+            };
+            table
+                .entry("request_auth_mode")
+                .or_insert_with(|| toml::Value::String(mode.into()));
+        }
+    }
+    value
+        .try_into()
+        .map_err(|_| "定义文件字段与当前适配器格式不一致".to_string())
+}
+
+fn load_adapters(dir: &Path) -> Result<Vec<AdapterDefinition>, String> {
+    let entries =
+        fs::read_dir(dir).map_err(|_| "找不到数据目录中的 definitions/adapters 文件夹")?;
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let text = fs::read_to_string(&path)
+                .map_err(|_| format!("无法读取定义文件 {}", path.display()))?;
+            parse_adapter(&text)
+                .map_err(|_| format!("定义文件 {} 格式无效，请检查 TOML", path.display()))
+        })
+        .collect()
 }
 
 fn load_dir<T: for<'de> Deserialize<'de>>(dir: &Path, label: &str) -> Result<Vec<T>, String> {
@@ -296,7 +365,7 @@ pub fn migrate_legacy_profiles(root: &Path) -> Result<(), String> {
         }
         let text = fs::read_to_string(&path)
             .map_err(|_| format!("无法读取定义文件 {}", path.display()))?;
-        let mut adapter: AdapterDefinition = toml::from_str(text.trim_start_matches('\u{feff}'))
+        let mut adapter = parse_adapter(&text)
             .map_err(|_| format!("定义文件 {} 格式无效，请检查 TOML", path.display()))?;
         if adapter.kind != "custom" {
             continue;
@@ -321,12 +390,37 @@ pub fn migrate_legacy_profiles(root: &Path) -> Result<(), String> {
         } else {
             "subscription".into()
         };
-        if adapter.layout_id.trim().is_empty() {
-            adapter.layout_id = if adapter.windows.is_empty() {
-                "balance".into()
+        if adapter.layout_ids.is_empty() {
+            if adapter.windows.is_empty() {
+                adapter.layout_ids = vec!["balance".into()];
             } else {
-                "subscription_daily".into()
-            };
+                // 旧自定义窗口 ID 不一定是规范词汇，为其生成专属单用途布局。
+                let layout = LayoutDefinition {
+                    id: format!("{}_layout", adapter.id),
+                    label: "额度".into(),
+                    blocks: adapter
+                        .windows
+                        .iter()
+                        .map(|window| LayoutBlock {
+                            component: "quota_card".into(),
+                            source: format!("windows.{}", window.id),
+                            title: if window.label.trim().is_empty() {
+                                window.id.clone()
+                            } else {
+                                window.label.clone()
+                            },
+                        })
+                        .collect(),
+                };
+                let layout_path = root.join("layouts").join(format!("{}.toml", layout.id));
+                if !layout_path.exists() {
+                    let layout_text = toml::to_string_pretty(&layout)
+                        .map_err(|_| format!("无法迁移定义文件 {}", path.display()))?;
+                    fs::create_dir_all(root.join("layouts")).map_err(|_| "无法创建额度布局目录")?;
+                    crate::data::atomic_write(&layout_path, &layout_text)?;
+                }
+                adapter.layout_ids = vec![layout.id];
+            }
         }
         let normalized = toml::to_string_pretty(&adapter)
             .map_err(|_| format!("无法迁移定义文件 {}", path.display()))?;
@@ -384,10 +478,10 @@ pub fn write_migrated_profile(
             "subscription"
         }
         .into(),
-        layout_id: format!("{id}_layout"),
+        layout_ids: vec![format!("{id}_layout")],
         request_method: "GET".into(),
         request_path: path.trim().into(),
-        request_auth: auth.trim().into(),
+        request_auth_mode: auth.trim().into(),
         balance_pointer: if presentation == "balance" || presentation == "balance_quota" {
             balance.trim()
         } else {
@@ -410,7 +504,7 @@ pub fn write_migrated_profile(
         });
     }
     let mut layout = LayoutDefinition {
-        id: definition.layout_id.clone(),
+        id: definition.layout_ids[0].clone(),
         label: if presentation == "balance" {
             "余额"
         } else {
@@ -476,9 +570,9 @@ pub fn write_profile(definitions_dir: &Path, input: &CustomProfileInput) -> Resu
     }
     if !matches!(input.request_method.as_str(), "GET" | "POST")
         || input.request_path.trim().is_empty()
-        || !matches!(input.request_auth.as_str(), "bearer" | "x_api_key" | "none")
+        || !matches!(input.request_auth_mode.as_str(), "auto" | "none")
     {
-        return Err("查询方式、路径或认证方式无效".into());
+        return Err("查询方式、路径或认证方式无效，请使用 auto 或 none".into());
     }
     if input.request_method == "GET" && !input.request_body.trim().is_empty() {
         return Err("GET 请求不能配置 Body".into());
@@ -500,10 +594,10 @@ pub fn write_profile(definitions_dir: &Path, input: &CustomProfileInput) -> Resu
         label: input.label.trim().to_string(),
         description: "使用此账号的接口地址与 Key 查询".into(),
         kind: input.kind.trim().to_string(),
-        layout_id: layout.id.clone(),
+        layout_ids: vec![layout.id.clone()],
         request_method: input.request_method.trim().to_string(),
         request_path: input.request_path.trim().to_string(),
-        request_auth: input.request_auth.trim().to_string(),
+        request_auth_mode: input.request_auth_mode.trim().to_string(),
         request_body: input.request_body.trim().to_string(),
         balance_pointer: input.balance_pointer.trim().to_string(),
         fallback_balance_pointer: input.fallback_balance_pointer.trim().to_string(),
@@ -565,9 +659,8 @@ pub fn custom_profile_id(name: &str) -> String {
 
 pub fn auth(value: &str) -> inspection::Auth {
     match value.trim().to_ascii_lowercase().as_str() {
-        "x_api_key" | "x-api-key" => inspection::Auth::XApiKey,
         "none" => inspection::Auth::None,
-        _ => inspection::Auth::Bearer,
+        _ => inspection::Auth::Auto,
     }
 }
 
@@ -612,7 +705,14 @@ mod tests {
         assert!(items.iter().any(|item| item.id == "quota_sub2api"));
         assert!(items.iter().any(|item| item.id == "balance_deepseek"));
         assert!(items.iter().any(|item| item.id == "quota_kimi"));
+        assert!(items.iter().any(|item| item.id == "quota_opencode_go"));
         assert!(items.iter().any(|item| item.id == "none"));
+        let go = items
+            .iter()
+            .find(|item| item.id == "quota_opencode_go")
+            .unwrap();
+        assert_eq!(go.layout_ids, vec!["hourly", "weekly", "monthly"]);
+        assert_eq!(go.blocks.len(), 3);
     }
 
     #[test]
@@ -633,7 +733,7 @@ mod tests {
             "示例",
             "quota",
             "/usage",
-            "bearer",
+            "auto",
             "",
             "/used",
             "/total",
@@ -667,6 +767,44 @@ mod tests {
         )
         .unwrap();
         assert!(Registry::load(dir.path()).unwrap_err().contains("重复"));
+    }
+
+    #[test]
+    fn legacy_custom_stub_is_removed_and_membership_layouts_still_load() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("adapters")).unwrap();
+        fs::create_dir_all(dir.path().join("layouts")).unwrap();
+        fs::write(
+            dir.path().join("adapters/custom.toml"),
+            "id = \"balance_custom\"\nlabel = \"新建查询方案…\"\ndescription = \"占位\"\nkind = \"custom\"\nlayout_id = \"balance\"\nrequest_method = \"GET\"\nrequest_path = \"\"\nrequest_auth = \"bearer\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("adapters/none.toml"),
+            "id = \"none\"\nlabel = \"不查询额度\"\ndescription = \"\"\nkind = \"none\"\nlayout_ids = [\"none\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("layouts/none.toml"),
+            "id = \"none\"\nlabel = \"不查询\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("layouts/subscription_daily.toml"),
+            "id = \"subscription_daily\"\nlabel = \"额度\"\n\n[[blocks]]\ncomponent = \"membership\"\nsource = \"membership\"\ntitle = \"套餐\"\n\n[[blocks]]\ncomponent = \"quota_card\"\nsource = \"windows.daily\"\ntitle = \"日额度\"\n",
+        )
+        .unwrap();
+        migrate_legacy_profiles(dir.path()).unwrap();
+        assert!(!dir.path().join("adapters/custom.toml").exists());
+        assert!(dir.path().join("legacy-backup/custom.toml").exists());
+        let registry = Registry::load(dir.path()).unwrap();
+        let layout = registry
+            .layouts
+            .iter()
+            .find(|layout| layout.id == "subscription_daily")
+            .unwrap();
+        assert_eq!(layout.blocks.len(), 1);
+        assert_eq!(layout.blocks[0].component, "quota_card");
     }
 }
 

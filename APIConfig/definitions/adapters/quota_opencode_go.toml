@@ -1,0 +1,36 @@
+id = "quota_opencode_go"
+label = "额度 · OpenCode Go"
+description = "OpenCode Go 订阅三窗口百分比；首卡为 5 小时 rolling"
+kind = "subscription"
+layout_ids = ["hourly", "weekly", "monthly"]
+request_method = "GET"
+request_path = "/zen/go/v1/usage"
+request_auth_mode = "auto"
+default_unit = "%"
+
+[[windows]]
+id = "hourly"
+label = "5 小时窗口"
+required = true
+scope_pointer = "/usage/rolling"
+used_pointer = "/percent"
+limit_value = 100
+reset_pointer = "/resetsAt"
+
+[[windows]]
+id = "weekly"
+label = "周额度"
+required = true
+scope_pointer = "/usage/weekly"
+used_pointer = "/percent"
+limit_value = 100
+reset_pointer = "/resetsAt"
+
+[[windows]]
+id = "monthly"
+label = "月额度"
+required = true
+scope_pointer = "/usage/monthly"
+used_pointer = "/percent"
+limit_value = 100
+reset_pointer = "/resetsAt"

@@ -2,17 +2,17 @@ id = "quota_minimax"
 label = "额度 · MiniMax Token Plan"
 description = "MiniMax Token Plan 的五小时与周窗口"
 kind = "subscription"
-layout_id = "subscription_daily_hourly"
+layout_ids = ["hourly", "weekly"]
 request_method = "GET"
 request_path = "token_plan/remains"
-request_auth = "bearer"
+request_auth_mode = "auto"
 array_pointer = "/model_remains"
 match_pointer = "/model_name"
 match_value = "general"
 default_unit = "%"
 
 [[windows]]
-id = "five_hour"
+id = "hourly"
 label = "5 小时窗口"
 required = true
 used_pointer = "/current_interval_used_percent"

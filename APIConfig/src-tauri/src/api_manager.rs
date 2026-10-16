@@ -7,7 +7,7 @@ use tauri::AppHandle;
 pub struct ApiEndpointView {
     pub protocol: String,
     pub url: String,
-    pub auth: String,
+    pub auth_mode: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -35,29 +35,19 @@ pub struct EndpointInput {
     pub protocol: String,
     pub url: String,
     #[serde(default)]
-    pub auth: String,
+    pub auth_mode: String,
 }
 
-fn auth(value: &str, protocol: api_probe::Protocol) -> crate::inspection::Auth {
-    match value {
-        "x_api_key" => crate::inspection::Auth::XApiKey,
-        "none" => crate::inspection::Auth::None,
-        "bearer" => crate::inspection::Auth::Bearer,
-        _ if protocol == api_probe::Protocol::Anthropic
-            || matches!(
-                protocol,
-                api_probe::Protocol::Genai | api_probe::Protocol::Vertexai
-            ) =>
-        {
-            crate::inspection::Auth::XApiKey
-        }
-        _ => crate::inspection::Auth::Bearer,
+fn auth(value: &str) -> Result<crate::inspection::Auth, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(crate::inspection::Auth::Auto),
+        "none" => Ok(crate::inspection::Auth::None),
+        _ => Err("认证方式无效，请重新选择（自动 / 无认证）".into()),
     }
 }
 fn auth_name(value: crate::inspection::Auth) -> String {
     match value {
-        crate::inspection::Auth::Bearer => "bearer",
-        crate::inspection::Auth::XApiKey => "x_api_key",
+        crate::inspection::Auth::Auto => "auto",
         crate::inspection::Auth::None => "none",
     }
     .into()
@@ -87,7 +77,7 @@ fn view(account: &data::ApiAccount) -> ApiAccountView {
             .map(|endpoint| ApiEndpointView {
                 protocol: api_probe::protocol_name(endpoint.protocol).into(),
                 url: endpoint.url.clone(),
-                auth: auth_name(endpoint.auth),
+                auth_mode: auth_name(endpoint.auth_mode),
             })
             .collect(),
         quota: crate::quota::Settings {
@@ -149,7 +139,7 @@ pub fn save_api_account(
             Ok(api_probe::ApiEndpoint {
                 protocol,
                 url: input.url.trim().into(),
-                auth: auth(&input.auth, protocol),
+                auth_mode: auth(&input.auth_mode)?,
             })
         })
         .collect::<Result<_, String>>()?;

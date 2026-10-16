@@ -54,8 +54,8 @@ export const reorderItems = (scene: Scene, kind: 'providers' | 'homes', names: s
 
 export const getApiProbeProfiles = () => invoke<ApiProbeProfile[]>('get_api_probe_profiles')
 export interface QuotaProfileWindow { id: string; label: string; required: boolean; used_pointer: string; limit_pointer: string; remaining_pointer: string; reset_pointer: string; limit_value?: number | null }
-export interface QuotaProfileBlock { component: 'balance_card' | 'quota_card' | 'membership'; source: string; title: string }
-export interface QuotaProfileDraft { id?: string; label: string; kind: 'balance' | 'subscription'; layout_id?: string; layout_label: string; request_method: 'GET' | 'POST'; request_path: string; request_auth: 'bearer' | 'x_api_key' | 'none'; request_body?: string; balance_pointer?: string; fallback_balance_pointer?: string; unit_pointer?: string; default_unit?: string; membership_pointer?: string; blocks: QuotaProfileBlock[]; windows: QuotaProfileWindow[] }
+export interface QuotaProfileBlock { component: 'balance_card' | 'quota_card'; source: string; title: string }
+export interface QuotaProfileDraft { id?: string; label: string; kind: 'balance' | 'subscription'; layout_label: string; request_method: 'GET' | 'POST'; request_path: string; request_auth_mode: 'auto' | 'none'; request_body?: string; balance_pointer?: string; fallback_balance_pointer?: string; unit_pointer?: string; default_unit?: string; membership_pointer?: string; blocks: QuotaProfileBlock[]; windows: QuotaProfileWindow[] }
 export const createQuotaProfile = (input: QuotaProfileDraft) => invoke<ApiProbeProfile>('create_quota_profile', { input })
 export const getApiAccounts = () => invoke<ApiAccount[]>('get_api_accounts')
 export const getApiAccountKey = (id: string) => invoke<string>('get_api_account_key', { id })
@@ -65,5 +65,5 @@ export const saveApiAccount = (originalName: string | null, name: string, kind: 
 export const deleteApiAccount = (name: string) => invoke<ApiAccount[]>('delete_api_account', { name })
 export const reorderApiAccounts = (names: string[]) => invoke<ApiAccount[]>('reorder_api_accounts', { names })
 export const probeApiAccount = (id: string) => invoke<ApiProbeResult>('probe_api_account', { id })
-export const checkApiModel = (id: string, model: string, protocol: 'openai' | 'openai_responses' | 'anthropic' | 'genai' | 'vertexai') =>
+export const checkApiModel = (id: string, model: string, protocol: 'openai' | 'openai_responses' | 'anthropic' | 'genai') =>
   invoke<ProbeResult>('check_api_model', { id, model, protocol })
