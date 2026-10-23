@@ -9,5 +9,10 @@ export interface AccountInput {
   digits: number; period: number; group: string; color: string; notes: string
 }
 export interface RecoveryCode { id: string; code: string; used: boolean }
-export interface OtpCode { code: string; period: number; validUntil: number; generatedAt: number }
+export interface TimeStatus {
+  enabled: boolean; syncing: boolean; source: 'local' | 'network'; offsetMs: number
+  uncertaintyMs: number | null; lastSuccessAt: number | null; validUntil: number | null
+  providers: string[]; error: string | null; revision: number
+}
+export interface OtpCode { code: string; period: number; validUntil: number; generatedAt: number; timeStatus: TimeStatus }
 export type Notify = (message: string, error?: boolean) => void

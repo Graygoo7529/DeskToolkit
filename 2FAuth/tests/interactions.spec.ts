@@ -6,12 +6,28 @@ async function fixture(page: Page, setup = false) {
     const state = { dataDir: setup ? null : 'B:\\Fixtures\\2FAuth', startupError: null, accounts: setup ? [] : [account('alice', 'GitHub', '个人', '#A7B8EF', true), account('work', 'GitHub', '工作', '#86CDB7'), account('google', 'Google', '个人', '#DDB18D'), account('gitlab', 'GitLab', '工作', '#C7A4DE'), account('microsoft', 'Microsoft', '个人', '#86C6DC')] }
     const recovery = [{ id: 'r1', code: 'recovery-001', used: false }, { id: 'r2', code: 'recovery-002', used: false }, { id: 'r3', code: 'recovery-003', used: false }, { id: 'r4', code: 'recovery-004', used: true }]
     const controls = { calls: [] as { cmd: string; args: any }[], failDirectory: false, failCode: false, nextCode: '123456', folder: 'B:\\Fixtures\\New', importFile: 'B:\\Fixtures\\backup.json', savedSecret: '', delayRecovery: 0 }
+    const time = { enabled: false, syncing: false, source: 'local', offsetMs: 0, uncertaintyMs: null as number | null, lastSuccessAt: null as number | null, validUntil: null as number | null, providers: [] as string[], error: null as string | null, revision: 0 }
+    const timeControls = { time, failTime: false, timeOffset: 90000, timeDelay: 60 }
+    Object.assign(controls, timeControls)
+    const startSync = () => {
+      time.syncing = true; time.revision++
+      const revision = time.revision
+      window.setTimeout(() => {
+        if (!time.enabled || time.revision !== revision) return
+        time.syncing = false; time.revision++
+        if ((controls as any).failTime) time.error = '时间来源请求超时'
+        else Object.assign(time, { source: 'network', offsetMs: (controls as any).timeOffset, uncertaintyMs: 700, lastSuccessAt: Date.now(), validUntil: Date.now() + 3600000, providers: ['Cloudflare', 'Microsoft'], error: null })
+      }, (controls as any).timeDelay)
+    }
     ;(window as any).__fixture = controls
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (cmd: string, args: any = {}) => {
       controls.calls.push({ cmd, args })
       if (cmd === 'get_state') return structuredClone(state)
+      if (cmd === 'get_time_status') return structuredClone(time)
+      if (cmd === 'set_online_time') { Object.assign(time, { enabled: args.enabled, syncing: false, source: 'local', offsetMs: 0, uncertaintyMs: null, lastSuccessAt: null, validUntil: null, providers: [], error: null, revision: time.revision + 1 }); if (args.enabled) startSync(); return structuredClone(time) }
+      if (cmd === 'sync_time') { if (!time.enabled) throw '请先开启联网校时'; if (!time.syncing) startSync(); return structuredClone(time) }
       if (cmd === 'suggest_data_dir') return 'B:\\Fixtures\\2FAuth'
-      if (cmd === 'get_code') { if (controls.failCode) throw '读取认证信息失败'; const now = Date.now(); return { code: controls.nextCode, period: 30, generatedAt: now, validUntil: (Math.floor(now / 30000) + 1) * 30000 } }
+      if (cmd === 'get_code') { if (controls.failCode) throw '读取认证信息失败'; const now = Date.now() + time.offsetMs; return { code: controls.nextCode, period: 30, generatedAt: now, validUntil: (Math.floor(now / 30000) + 1) * 30000, timeStatus: structuredClone(time) } }
       if (cmd === 'plugin:clipboard-manager|write_text') return
       if (cmd === 'plugin:dialog|open') return args.options?.directory ? controls.folder : controls.importFile
       if (cmd === 'plugin:dialog|save') return 'B:\\Fixtures\\export.json'
@@ -166,4 +182,64 @@ test('失焦隐藏敏感信息，延迟结果不泄露到其他账户，计算�
   await page.evaluate(() => { (window as any).__fixture.failCode = true })
   await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeDisabled()
   await expect(page.getByRole('alert')).toContainText('读取认证信息失败')
+})
+
+test('校时默认关闭，正负时间偏差下倒计时与复制一致，关闭恢复本地时间', async ({ page }, info) => {
+  await fixture(page)
+  await expect(page.getByRole('button', { name: '时间校准' })).toContainText('本地时间 · 离线')
+  expect(await page.evaluate(() => (window as any).__fixture.calls.filter((c: any) => ['set_online_time', 'sync_time'].includes(c.cmd)).length)).toBe(0)
+  await page.getByRole('button', { name: '时间校准' }).click()
+  await expect(page.getByRole('switch', { name: '联网校时' })).not.toBeChecked()
+  await expect(page.getByRole('button', { name: '立即校时' })).toBeDisabled()
+  await page.getByRole('switch', { name: '联网校时' }).click()
+  await expect(page.getByText('+90.000 秒', { exact: true })).toBeVisible()
+  await expect(page.locator('.countdown')).toHaveText(/\d+秒/)
+  await page.screenshot({ path: info.outputPath('time-settings.png') })
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '复制验证码', exact: true }).click()
+  await expect(page.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
+  await page.evaluate(() => { (window as any).__fixture.timeOffset = -90000 })
+  await page.getByRole('button', { name: '时间校准' }).click()
+  await page.getByRole('button', { name: '立即校时' }).click()
+  await expect(page.getByText('-90.000 秒', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '点击复制验证码' })).toHaveText('123 456')
+  await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '复制验证码', exact: true }).click()
+  await expect(page.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '时间校准' }).click()
+  await page.getByRole('switch', { name: '联网校时' }).click()
+  await expect(page.getByRole('button', { name: '时间校准' })).toContainText('本地时间 · 离线')
+  await expect(page.getByText('0 秒', { exact: true })).toBeVisible()
+})
+
+test('校时失败明确回退，已有结果可继续使用，过期后恢复本地时间', async ({ page }) => {
+  await fixture(page)
+  await page.evaluate(() => { (window as any).__fixture.failTime = true })
+  await page.getByRole('button', { name: '时间校准' }).click()
+  await page.getByRole('switch', { name: '联网校时' }).click()
+  await expect(page.locator('.time-warning')).toContainText('当前使用本地系统时间')
+  await page.evaluate(() => { (window as any).__fixture.failTime = false })
+  await page.getByRole('button', { name: '立即校时' }).click()
+  await expect(page.getByText('+90.000 秒', { exact: true })).toBeVisible()
+  await page.evaluate(() => { (window as any).__fixture.failTime = true })
+  await page.getByRole('button', { name: '立即校时' }).click()
+  await expect(page.locator('.time-warning')).toContainText('仍在使用有效期内的上次校正结果')
+  await page.evaluate(() => { const t = (window as any).__fixture.time; Object.assign(t, { source: 'local', offsetMs: 0, validUntil: null, error: '校时结果已过期，已回退本地时间', revision: t.revision + 1 }) })
+  await expect(page.getByText('0 秒', { exact: true })).toBeVisible()
+  await expect(page.locator('.time-warning')).toContainText('当前使用本地系统时间')
+})
+
+test('校时请求未完成时仍可关闭开关，迟到结果不会恢复校正', async ({ page }) => {
+  await fixture(page)
+  await page.evaluate(() => { (window as any).__fixture.timeDelay = 350 })
+  await page.getByRole('button', { name: '时间校准' }).click()
+  await page.getByRole('switch', { name: '联网校时' }).click()
+  await expect(page.getByRole('button', { name: '校时中…' })).toBeDisabled()
+  await page.getByRole('switch', { name: '联网校时' }).click()
+  await expect(page.getByRole('switch', { name: '联网校时' })).not.toBeChecked()
+  await page.waitForTimeout(400)
+  await expect(page.getByRole('button', { name: '时间校准' })).toContainText('本地时间 · 离线')
+  await expect(page.getByText('0 秒', { exact: true })).toBeVisible()
 })

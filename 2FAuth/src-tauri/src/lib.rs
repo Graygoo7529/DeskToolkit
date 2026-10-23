@@ -1,11 +1,11 @@
 mod otp;
 mod store;
+mod time_sync;
 
 use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{Arc, Mutex, MutexGuard},
 };
 use store::{AccountInput, AccountSummary, RecoveryCode, Store};
 use tauri::{Manager, State};
@@ -107,20 +107,41 @@ struct Code {
     period: u64,
     valid_until: u64,
     generated_at: u64,
+    time_status: time_sync::TimeStatus,
 }
 #[tauri::command]
-fn get_code(state: State<Shared>, id: String) -> Result<Code, String> {
+fn get_code(
+    state: State<Shared>,
+    clock: State<Arc<time_sync::TimeService>>,
+    id: String,
+) -> Result<Code, String> {
     let s = lock(&state)?;
     let a = s.account(&id)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| "系统时间早于 1970 年，请校准系统时间")?;
+    let (now, time_status) = clock.now()?;
     Ok(Code {
-        code: otp::generate(&a.secret, a.algorithm, a.digits, a.period, now.as_secs())?,
+        code: otp::generate(&a.secret, a.algorithm, a.digits, a.period, now / 1000)?,
         period: a.period,
-        generated_at: now.as_millis() as u64,
-        valid_until: (now.as_secs() / a.period + 1) * a.period * 1000,
+        generated_at: now,
+        valid_until: (now / 1000 / a.period + 1) * a.period * 1000,
+        time_status,
     })
+}
+#[tauri::command]
+fn get_time_status(
+    clock: State<Arc<time_sync::TimeService>>,
+) -> Result<time_sync::TimeStatus, String> {
+    clock.status()
+}
+#[tauri::command]
+fn set_online_time(
+    clock: State<Arc<time_sync::TimeService>>,
+    enabled: bool,
+) -> Result<time_sync::TimeStatus, String> {
+    clock.set_enabled(enabled)
+}
+#[tauri::command]
+fn sync_time(clock: State<Arc<time_sync::TimeService>>) -> Result<time_sync::TimeStatus, String> {
+    clock.request_sync()
 }
 #[tauri::command]
 fn get_recovery_codes(state: State<Shared>, id: String) -> Result<Vec<RecoveryCode>, String> {
@@ -172,6 +193,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let config: PathBuf = app.path().app_config_dir()?.join("storage.json");
+            let clock = Arc::new(time_sync::TimeService::new(
+                app.path().app_config_dir()?.join("time-settings.json"),
+            ));
+            app.manage(clock.clone());
+            tauri::async_runtime::spawn(clock.run());
             app.manage(Mutex::new(Store::new(config)));
             Ok(())
         })
@@ -190,7 +216,10 @@ pub fn run() {
             save_recovery_codes,
             set_recovery_used,
             import_backup,
-            export_backup
+            export_backup,
+            get_time_status,
+            set_online_time,
+            sync_time
         ])
         .run(tauri::generate_context!())
         .expect("无法启动 2FAuth");

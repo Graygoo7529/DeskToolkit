@@ -22,7 +22,17 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if ($smokeNames -notcontains '选择数据目录' -and $smokeNames -notcontains '添加认证账户') { throw 'Native frontend did not reach its loaded state.' }
-    'PASS: real desktop window, bundled frontend, Rust get_state IPC, loaded account/setup screen. No vault or clipboard changes.'
+    $smokeTimeButton = $smokeRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '时间校准'))
+    if ($null -eq $smokeTimeButton) { throw 'Time settings entry is missing.' }
+    $smokeTimeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    for ($smokeAttempt = 0; $smokeAttempt -lt 40; $smokeAttempt++) {
+        $smokeElements = $smokeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        $smokeNames = @($smokeElements | ForEach-Object { $_.Current.Name })
+        if (($smokeNames -contains '联网校时') -and (($smokeNames -contains '本地系统时间') -or ($smokeNames -contains '网络校正时间'))) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($smokeNames -notcontains '联网校时' -or $smokeNames -contains '时间状态未就绪') { throw 'Native time settings did not load.' }
+    'PASS: real desktop window, bundled frontend, Rust state/time IPC, loaded time settings panel. No settings, vault or clipboard changes.'
 } finally {
     if (-not $smokeProcess.HasExited) { Stop-Process -Id $smokeProcess.Id }
     $env:WEBVIEW2_USER_DATA_FOLDER = $smokeOldFolder

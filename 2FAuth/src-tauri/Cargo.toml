@@ -27,4 +27,6 @@ percent-encoding = "2"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 fs2 = "0.4"
-
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+httpdate = "1"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }

@@ -14,6 +14,19 @@
 
 ![2FAuth 主界面（虚构演示账户）](docs/preview.png)
 
+## 可选联网校时
+
+点击顶部“时间校准”可开启联网校时，**默认关闭**。关闭时使用本机系统时间且不发起校时请求；开启后立即校时，并每 15 分钟刷新，也可点击“立即校时”。开关保存在应用配置目录的 `time-settings.json` 中，下次启动沿用设置；校正结果仅在内存中保留，重启后重新获取。
+
+- 校时仅影响 2FAuth 的验证码、倒计时与复制时的有效期检查，不修改 Windows 时间，不需要管理员权限。
+- 通过 HTTPS 请求 Cloudflare、Microsoft、Google 的响应时间，只读取响应头，不发送账户、共享密钥、恢复码或验证码。至少两个来源的估算偏差在 2 秒内一致才采用，并显示采用来源与估计误差。
+- 校验 HTTPS 证书、拒绝过期缓存、超过 3 秒的响应和校时期间的系统时间跳变。HTTP 时间为秒级精度，适合常见的 30 秒认证周期，不提供精密授时保证。
+- 网络失败后每分钟重试，继续使用上次成功后一小时内仍有效的结果；没有有效结果时回退本地时间，并显示原因。结果过期或检测到系统时间跳变 / 休眠异常时停用旧校正并重新校时。
+- 关闭开关会取消尚未完成的请求、清除时间校正并立即切回本地时间；迟到的响应不会重新启用校正。
+- 若电脑日期严重错误导致 HTTPS 证书验证失败，需要先校正系统日期。应用不会绕过证书校验。
+
+![时间校准设置（模拟偏差）](docs/time-settings.png)
+
 ## 本地数据
 
 ```text
@@ -69,8 +82,10 @@ cargo test --lib
 cargo fmt --check
 ```
 
-Rust 测试覆盖 RFC 6238 的全部 18 个 SHA-1 / SHA-256 / SHA-512 标准向量，以及时间边界、前导零、URI / Base32 校验、真实文件持久化、备份合并、目录锁、损坏文件和外部修改保护。Playwright 使用 Edge，通过模拟 Tauri IPC 检查账户、恢复码、导入和数据目录交互；不连接真实平台、不使用真实密钥。
+Rust 测试覆盖 RFC 6238 的全部 18 个 SHA-1 / SHA-256 / SHA-512 标准向量，以及时间边界、前导零、URI / Base32 校验、真实文件持久化、备份合并、目录锁、损坏文件和外部修改保护。校时测试覆盖默认关闭、设置持久化、来源一致性、缓存 / 延迟拒绝、失败保留、结果过期、系统时间变化、请求取消与迟到响应。Playwright 使用 Edge，通过模拟 Tauri IPC 检查账户、恢复码、导入、数据目录，以及正负时间偏差下的倒计时、复制和校时开关交互；不连接真实平台、不使用真实密钥。
 
-Windows 构建后可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/native-smoke.ps1`，通过 UI Automation 检查实际 exe、打包的前端和 Rust 初始化命令；检查不创建账户库或修改剪贴板。该脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文解析。
+真实 HTTPS 校时检查为显式运行的测试：在 `src-tauri` 目录执行 `cargo test --lib time_sync::tests::live_https_sources -- --ignored --nocapture`。常规测试与 CI 不依赖外部时间服务。
 
-算法规范：[RFC 6238](https://www.rfc-editor.org/rfc/rfc6238)。认证链接格式：[Google Authenticator Key URI Format](https://github.com/google/google-authenticator/wiki/Key-Uri-Format)。HMAC 与 SHA 实现使用 RustCrypto 库。时间来自本机系统，应用不联网校时，校验失败时请先检查系统时间。
+Windows 构建后可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/native-smoke.ps1`，通过 UI Automation 检查实际 exe、打包的前端、Rust 初始化命令和时间校准面板；检查不修改校时设置、不创建账户库或修改剪贴板。该脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文解析。
+
+算法规范：[RFC 6238](https://www.rfc-editor.org/rfc/rfc6238)。认证链接格式：[Google Authenticator Key URI Format](https://github.com/google/google-authenticator/wiki/Key-Uri-Format)。HTTPS 时间响应参考 [RFC 9110 Date](https://www.rfc-editor.org/rfc/rfc9110.html#name-date)。HMAC 与 SHA 实现使用 RustCrypto 库。
