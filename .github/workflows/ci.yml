@@ -8,6 +8,30 @@ permissions:
   contents: read
 
 jobs:
+  twofauth:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: 2FAuth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: 2FAuth/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+
   apiconfig:
     runs-on: windows-latest
     defaults:

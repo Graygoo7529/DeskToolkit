@@ -1,0 +1,6 @@
+test-results/
+playwright-report/
+**/accounts.json
+**/accounts.previous.json
+**/.2fauth.lock
+**/2fauth-backup-*.json

@@ -1,0 +1,30 @@
+[package]
+name = "twofauth"
+version = "0.1.0"
+description = "2FAuth - 本地双因素认证工具"
+edition = "2021"
+
+[lib]
+name = "twofauth_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+data-encoding = "2"
+url = "2"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+fs2 = "0.4"
+
