@@ -1,4 +1,4 @@
-export type IconName = "folder" | "plus" | "copy" | "trash" | "search" | "settings" | "undo" | "redo" | "code" | "edit";
+export type IconName = "folder" | "plus" | "copy" | "trash" | "search" | "settings" | "undo" | "redo" | "code" | "edit" | "external";
 const paths: Record<IconName, string> = {
   folder: "M3 7V5a2 2 0 0 1 2-2h5l3 3h6a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
   plus: "M12 5v14M5 12h14",
@@ -10,8 +10,8 @@ const paths: Record<IconName, string> = {
   redo: "m16 4 5 5-5 5M21 9H11a7 7 0 0 0-7 7v4",
   code: "m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18",
   edit: "m4 16 12-12 4 4L8 20H4v-4ZM14 6l4 4",
+  external: "M14 3h7v7M21 3l-11 11M10 3H4v18h17v-6",
 };
 export default function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
-

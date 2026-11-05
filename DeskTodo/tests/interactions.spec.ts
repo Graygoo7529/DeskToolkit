@@ -17,14 +17,14 @@ async function raw(page: Page) {
   return value;
 }
 
-test("first launch is one inbox and paper; compact UI and larger type", async ({ page }) => {
+test("first launch is one inbox and paper with a compact reading surface", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", e => errors.push(e.message));
   await start(page);
   await expect(page.locator(".folder")).toHaveCount(1);
   await expect(page.locator(".note-tabs button")).toHaveCount(1);
   await expect(page.getByRole("region", { name: "待办纸", exact: true })).toHaveCount(1);
-  expect(await page.locator(".note-document").evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(17);
+  expect(await page.locator(".note-document").evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBe(15);
   await expect(page.getByText("保持流动")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "复制 note", exact: true })).toHaveCount(0);
   await page.screenshot({ path: "test-results/desktodo-main.png" });
@@ -156,4 +156,3 @@ test("clipboard copies markdown without making a duplicate; read failure keeps t
   await expect(page.getByRole("heading", { name: "暂时无法读取便签" })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("desktodo-workspace-v2"))).toBe("{ broken");
 });
-

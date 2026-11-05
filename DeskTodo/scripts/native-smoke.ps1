@@ -1,4 +1,4 @@
-﻿# Read the packaged application's UI. Do not modify workspace or directory settings.
+﻿# Read the packaged UI without simulated edits or directory switching. Startup may migrate legacy storage.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -22,7 +22,7 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if (-not $smokeLoaded) { throw 'Native frontend did not reach setup or the workspace.' }
-    'PASS: packaged desktop window, bundled frontend and Rust initialization IPC. No data or settings changes.'
+    'PASS: packaged desktop window, bundled frontend and Rust initialization IPC. No simulated UI edits or directory changes.'
 } finally {
     if (-not $smokeProcess.HasExited) { Stop-Process -Id $smokeProcess.Id }
     $env:WEBVIEW2_USER_DATA_FOLDER = $smokeOldFolder

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Editor } from "@tiptap/core";
 import { colors, createWorkspace, errorText, newNote, uid, type Note, type Workspace } from "./model";
-import { changeDirectory, desktop, getStorageState, legacyWorkspace, readWorkspace, SaveQueue, type Loaded } from "./storage";
+import { changeDirectory, desktop, getStorageState, legacyWorkspace, openNoteFile, preserveAndReload, readWorkspace, SaveQueue, type Loaded } from "./storage";
 import DirectoryForm from "./DirectoryForm";
 import Modal from "./Modal";
 import Icon from "./Icons";
@@ -24,6 +24,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [source, setSource] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [folderDialog, setFolderDialog] = useState<"new" | "rename" | null>(null);
   const [folderName, setFolderName] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -94,6 +95,28 @@ export default function App() {
     const loaded = await changeDirectory(path, seed);
     load(loaded); setStorageOpen(false);
   };
+  const reloadFiles = async (preserve = false) => {
+    setReloading(true);
+    try {
+      if (preserve) await queue.current.flush().catch(() => undefined);
+      else await queue.current.flush();
+      const loaded = preserve && workspaceRef.current
+        ? await preserveAndReload(pathRef.current, workspaceRef.current)
+        : await readWorkspace();
+      queue.current.reset();
+      load(loaded);
+      const selected = loaded.workspace.clusters.find(c => c.id === clusterId);
+      if (selected) { setClusterId(selected.id); setNoteId(selected.notes.some(n => n.id === noteId) ? noteId : selected.notes[0]?.id || ""); }
+      setStorageOpen(false);
+      setToast(preserve ? "当前版本已另存到数据目录的 .desktodo/drafts，已载入磁盘内容" : "已重新载入 Markdown 文件");
+    } catch (e) { setToast("重新载入失败：" + errorText(e)); }
+    finally { setReloading(false); }
+  };
+  const openFile = async () => {
+    if (!note) return;
+    try { await queue.current.flush(); await openNoteFile(note.id); }
+    catch (e) { setToast("打开文件失败：" + errorText(e)); }
+  };
   const copy = async () => {
     if (!note) return;
     try { await navigator.clipboard.writeText(note.content); setToast("便签内容已复制"); }
@@ -119,14 +142,14 @@ export default function App() {
   }, [toast]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.isComposing || setup || storageOpen || folderDialog || deleting) return;
+      if (e.isComposing || setup || storageOpen || folderDialog || deleting || reloading) return;
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); addNote(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault(); if (workspaceRef.current) save(workspaceRef.current);
       }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
-  }, [addNote, save, setup, storageOpen, folderDialog, deleting]);
+  }, [addNote, save, setup, storageOpen, folderDialog, deleting, reloading]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -182,7 +205,7 @@ export default function App() {
         <div className="tabs-row"><nav className="note-tabs" aria-label="夹内便签切换">{visibleNotes.map(n => <button key={n.id} className={n.id === noteId ? "selected" : ""} aria-current={n.id === noteId ? "page" : undefined} title={n.title} onClick={() => switchNote(n.id)}>{n.title || "未命名便签"}</button>)}{search && !visibleNotes.length && <span className="no-results">没有匹配的便签</span>}</nav>
           <button className="icon-button new-note" title="新建便签 · Ctrl+Shift+N" aria-label="新建便签" onClick={addNote}><Icon name="plus" /></button>
         </div>
-        {saveError && <div className="save-error" role="alert"><span>{saveError}</span><button onClick={() => workspaceRef.current && save(workspaceRef.current)}>重试保存</button></div>}
+        {saveError && <div className="save-error" role="alert"><span>{saveError}</span><button onClick={() => workspaceRef.current && save(workspaceRef.current)}>重试保存</button>{desktop && <button onClick={() => void reloadFiles(true)}>保留副本并重新载入</button>}</div>}
         {note ? <section className="note-sheet">
           <header className="note-toolbar"><input ref={title} className="note-title" aria-label="便签标题" placeholder="未命名便签" value={note.title} onChange={e => updateNote({ title: e.target.value })} />
             <div className="note-actions">
@@ -191,6 +214,7 @@ export default function App() {
               <span className="divider" />
               <button className={"icon-button" + (source ? "active" : "")} aria-label={source ? "返回即时编辑" : "查看 Markdown"} title={source ? "返回即时编辑" : "Markdown 源码"} onClick={() => setSource(v => !v)}><Icon name={source ? "edit" : "code"} size={16} /></button>
               <button className="icon-button" aria-label="复制便签内容" title="复制 Markdown 内容" onClick={() => void copy()}><Icon name="copy" size={16} /></button>
+              {desktop && <button className="icon-button" aria-label="打开 Markdown 文件" title="用默认应用打开 Markdown 文件" onClick={() => void openFile()}><Icon name="external" size={15} /></button>}
               <button className="icon-button danger" aria-label="删除便签" title="删除便签" onClick={() => setDeleting(true)}><Icon name="trash" size={16} /></button>
             </div>
           </header>
@@ -202,9 +226,10 @@ export default function App() {
         </section> : <section className="empty-note"><Icon name="edit" size={32} /><h2>给这个夹写第一张便签</h2><button className="button primary" onClick={addNote}>新建便签</button></section>}
       </main>
     </div>
-    {storageOpen && <Modal title="数据目录" onClose={() => setStorageOpen(false)}><DirectoryForm current={dataDir} suggested={suggested} migrating onApply={applyDirectory} onCancel={() => setStorageOpen(false)} /></Modal>}
+    {storageOpen && <Modal title="数据目录" onClose={() => setStorageOpen(false)}><DirectoryForm current={dataDir} suggested={suggested} migrating onApply={applyDirectory} onCancel={() => setStorageOpen(false)} onReload={() => reloadFiles()} canReload={saveState === "saved"} /></Modal>}
     {folderDialog && <Modal title={folderDialog === "new" ? "新建 note 夹" : "重命名 note 夹"} onClose={() => setFolderDialog(null)}><form onSubmit={e => { e.preventDefault(); submitFolder(); }}><label className="field"><span>名称</span><input aria-label="Note 夹名称" value={folderName} onChange={e => setFolderName(e.target.value)} maxLength={80} /></label><div className="modal-actions"><button type="button" className="button" onClick={() => setFolderDialog(null)}>取消</button><button className="button primary" disabled={!folderName.trim()}>保存</button></div></form></Modal>}
     {deleting && <Modal title="删除便签" onClose={() => setDeleting(false)}><p className="hint">将删除「{note?.title || "未命名便签"}」及其内容。</p><div className="modal-actions"><button className="button" onClick={() => setDeleting(false)}>取消</button><button className="button danger-solid" onClick={deleteNote}>确认删除</button></div></Modal>}
     {toast && <div className="toast" role="status">{toast}</div>}
+    {reloading && <div className="overlay loading-overlay" role="status" aria-live="polite"><div className="reload-card">正在载入便签文件…</div></div>}
   </div>;
 }

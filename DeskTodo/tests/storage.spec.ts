@@ -7,6 +7,7 @@ async function mockDesktop(page: Page, broken = false) {
       current: broken ? "B:\\missing" : null as string | null,
       failSave: false,
       log: [] as string[],
+      drafts: [] as any[],
       directories: {} as Record<string, any>,
     };
     state.directories["B:\\existing"] = { clusters: [{ id: "inbox", name: "已有目录", icon: "folder", color: "#8fa9f7", notes: [{ id: "note", title: "同 ID 的另一个版本", content: "# 来自另一个目录", color: "#8fa9f7", updatedAt: 1 }] }] };
@@ -39,6 +40,12 @@ async function mockDesktop(page: Page, broken = false) {
           state.log.push("save:" + args.path);
           return;
         }
+        if (command === "preserve_and_reload") {
+          state.drafts.push(structuredClone(args.workspace));
+          state.failSave = false;
+          return { dataDir: state.current, workspace: structuredClone(state.directories[state.current!]) };
+        }
+        if (command === "open_note_file") { state.log.push("open:" + args.noteId); return; }
         throw new Error("Unexpected IPC: " + command);
       },
     };
@@ -86,5 +93,30 @@ test("unavailable desktop directory offers recovery without automatically replac
   await page.getByRole("button", { name: "选择其他数据目录", exact: true }).click();
   await page.getByRole("textbox", { name: "数据目录路径" }).fill("B:\\existing");
   await page.getByRole("button", { name: "开始使用", exact: true }).click();
+  await expect(page.locator(".note-document h1")).toHaveText("来自另一个目录");
+});
+
+test("external Markdown edits reload; conflict recovery preserves the draft and allows saving again", async ({ page }) => {
+  await mockDesktop(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "迁入便签并开始", exact: true }).click();
+  await page.getByRole("button", { name: "打开 Markdown 文件", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).__disk.log)).toContain("open:note");
+  await page.evaluate(() => { (window as any).__disk.directories["B:\\first"].clusters[0].notes[0].content = "# 文件中的修改"; });
+  await page.getByRole("button", { name: /数据目录 保存在此设备/ }).click();
+  await page.getByRole("button", { name: "重新载入文件", exact: true }).click();
+  await expect(page.locator(".note-document h1")).toHaveText("文件中的修改");
+  await page.evaluate(() => {
+    (window as any).__disk.directories["B:\\first"].clusters[0].notes[0].content = "# 外部新版本";
+    (window as any).__disk.failSave = true;
+  });
+  await page.getByRole("textbox", { name: "便签标题", exact: true }).fill("应用内草稿");
+  await expect(page.locator(".save-status")).toHaveText("未能保存");
+  await page.getByRole("button", { name: "保留副本并重新载入", exact: true }).click();
+  await expect(page.locator(".note-document h1")).toHaveText("外部新版本");
+  expect(await page.evaluate(() => (window as any).__disk.drafts[0].clusters[0].notes[0].title)).toBe("应用内草稿");
+  await page.getByRole("textbox", { name: "便签标题", exact: true }).fill("重新保存成功");
+  await expect(page.locator(".save-status")).toHaveText("已保存");
+  await switchDirectory(page, "B:\\existing");
   await expect(page.locator(".note-document h1")).toHaveText("来自另一个目录");
 });

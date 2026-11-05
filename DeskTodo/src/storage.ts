@@ -39,6 +39,12 @@ export async function browseDirectory(): Promise<string | null> {
 export async function openDirectory() {
   if (desktop) await invoke("open_data_dir");
 }
+export async function openNoteFile(noteId: string) {
+  if (desktop) await invoke("open_note_file", { noteId });
+}
+export async function preserveAndReload(path: string, workspace: Workspace): Promise<Loaded> {
+  return invoke("preserve_and_reload", { path, workspace });
+}
 // Serialize writes and coalesce pending typing; never issue a late write after a directory switch.
 export class SaveQueue {
   private tail: Promise<void> = Promise.resolve();
@@ -52,5 +58,6 @@ export class SaveQueue {
     return task;
   }
   async flush() { await this.tail; }
+  // Only after all pending writes have settled and a replacement workspace has loaded.
+  reset() { this.revision++; this.tail = Promise.resolve(); }
 }
-
