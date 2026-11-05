@@ -1,418 +1,210 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import type { Editor } from "@tiptap/core";
+import { colors, createWorkspace, errorText, newNote, uid, type Note, type Workspace } from "./model";
+import { changeDirectory, desktop, getStorageState, legacyWorkspace, readWorkspace, SaveQueue, type Loaded } from "./storage";
+import DirectoryForm from "./DirectoryForm";
+import Modal from "./Modal";
+import Icon from "./Icons";
+import NoteEditor from "./editor/NoteEditor";
 
-type Note = { id: string; title: string; content: string; color: string; updatedAt: number };
-type Cluster = { id: string; name: string; icon: string; color: string; notes: Note[] };
-type Workspace = { clusters: Cluster[] };
-
-const STORAGE_KEY = "desktodo-workspace-v1";
-const colors = ["#8c9eff", "#8bd8c2", "#e9ad79", "#d7a1ef", "#ef8f9e", "#7fc6ea"];
-
-const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-
-const starter: Workspace = {
-  clusters: [
-    {
-      id: "inbox",
-      name: "收件箱",
-      icon: "✦",
-      color: "#8c9eff",
-      notes: [
-        {
-          id: "welcome",
-          title: "欢迎来到 DeskTodo",
-          color: "#8c9eff",
-          updatedAt: Date.now(),
-          content: `# 让想法有个落脚点
-
-DeskTodo 是一张安静、灵活的桌面便签。把零散想法放进 note，再用 **Markdown** 把它们整理成可以行动的计划。
-
-## 现在就试试
-
-- [ ] 按下 Ctrl / ⌘ + K 打开快捷菜单
-- [ ] 勾选这条待办，或移除它
-- [x] 已完成的事情可以一键清理
-
-> 小提示：在新行输入斜杠，也可以呼出插入菜单。
-
-$$
-\text{one thought} + \text{one action} = \text{momentum}
-$$`,
-        },
-        {
-          id: "today",
-          title: "今日清单",
-          color: "#e9ad79",
-          updatedAt: Date.now() - 3600000,
-          content: `# 今天只做重要的事
-
-- [ ] 整理本周会议记录
-- [ ] 给设计稿补充交互说明
-- [x] 回复项目同步邮件
-
-## 记录
-
-把下一步写得足够小，开始就会变得容易。`,
-        },
-      ],
-    },
-    {
-      id: "work",
-      name: "工作流",
-      icon: "◈",
-      color: "#8bd8c2",
-      notes: [
-        {
-          id: "sprint",
-          title: "Sprint planning",
-          color: "#8bd8c2",
-          updatedAt: Date.now() - 7200000,
-          content: `# Sprint planning
-
-## 本周目标
-
-- [ ] 确认交付边界
-- [ ] 拆分接口任务
-- [ ] 预留验收时间
-
-流程：focus → build → review → ship`,
-        },
-      ],
-    },
-    {
-      id: "ideas",
-      name: "灵感库",
-      icon: "✺",
-      color: "#d7a1ef",
-      notes: [
-        {
-          id: "quiet",
-          title: "安静的产品想法",
-          color: "#d7a1ef",
-          updatedAt: Date.now() - 86400000,
-          content: `# 安静的产品想法
-
-把工具做成一张不会打断人的桌面纸张：
-
-1. 先写下来
-2. 再慢慢整理
-3. 在合适的时间行动
-
-标签：calm · local-first`,
-        },
-      ],
-    },
-  ],
-};
-
-function loadWorkspace(): Workspace {
-  try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as Workspace | null;
-    if (value?.clusters?.length) return value;
-  } catch {
-    // A broken local cache should never prevent the note app from opening.
-  }
-  return starter;
-}
-
-function noteStats(content: string) {
-  const todos = content.match(/^\s*[-*]\s+\[[ xX]\]\s+.+$/gm) || [];
-  const done = todos.filter((line) => /\[[xX]\]/.test(line)).length;
-  return { total: todos.length, done };
-}
-
-function formatTime(value: number) {
-  const date = new Date(value);
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  }
-  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
-}
-
-function Icon({ children }: { children: string }) {
-  return <span className="icon" aria-hidden="true">{children}</span>;
-}
-
-function InlineMarkdown({ text }: { text: string }) {
-  const pieces = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
-  return (
-    <>
-      {pieces.map((piece, index) => {
-        if (piece.startsWith("`") && piece.endsWith("`")) return <code key={index}>{piece.slice(1, -1)}</code>;
-        if (piece.startsWith("**") && piece.endsWith("**")) return <strong key={index}>{piece.slice(2, -2)}</strong>;
-        if (piece.startsWith("*") && piece.endsWith("*")) return <em key={index}>{piece.slice(1, -1)}</em>;
-        if (piece.startsWith("~~") && piece.endsWith("~~")) return <del key={index}>{piece.slice(2, -2)}</del>;
-        const link = piece.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-        if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>;
-        return <Fragment key={index}>{piece}</Fragment>;
-      })}
-    </>
-  );
-}
-
-type PreviewProps = {
-  content: string;
-  onToggleTodo: (lineIndex: number) => void;
-  onRemoveTodo: (lineIndex: number) => void;
-};
-
-function MarkdownPreview({ content, onToggleTodo, onRemoveTodo }: PreviewProps) {
-  const lines = content.split("\n");
-  const blocks: React.ReactNode[] = [];
-  let inCode = false;
-  let codeLines: string[] = [];
-  let codeStart = 0;
-  let inFormula = false;
-  let formulaLines: string[] = [];
-
-  lines.forEach((line, index) => {
-    if (line.trim().startsWith("```") && !inFormula) {
-      if (!inCode) {
-        inCode = true;
-        codeStart = index;
-        codeLines = [];
-      } else {
-        blocks.push(<pre className="code-block" key={`code-${codeStart}`}><code>{codeLines.join("\n")}</code></pre>);
-        inCode = false;
-      }
-      return;
-    }
-    if (inCode) {
-      codeLines.push(line);
-      return;
-    }
-    if (line.trim() === "$$") {
-      if (!inFormula) {
-        inFormula = true;
-        formulaLines = [];
-      } else {
-        blocks.push(<div className="formula-block" key={`formula-${index}`}><span className="formula-label">ƒx</span><code>{formulaLines.join(" ")}</code></div>);
-        inFormula = false;
-      }
-      return;
-    }
-    if (inFormula) {
-      formulaLines.push(line.trim());
-      return;
-    }
-    if (!line.trim()) {
-      blocks.push(<div className="md-space" key={`space-${index}`} />);
-      return;
-    }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const Tag = `h${heading[1].length}` as "h1" | "h2" | "h3";
-      blocks.push(<Tag key={index}><InlineMarkdown text={heading[2]} /></Tag>);
-      return;
-    }
-    const todo = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
-    if (todo) {
-      const checked = todo[1].toLowerCase() === "x";
-      blocks.push(
-        <div className={`todo-row ${checked ? "is-done" : ""}`} key={index}>
-          <button className={`todo-check ${checked ? "checked" : ""}`} onClick={() => onToggleTodo(index)} aria-label={checked ? "标记未完成" : "标记完成"}>{checked ? "✓" : ""}</button>
-          <span><InlineMarkdown text={todo[2]} /></span>
-          <button className="todo-remove" onClick={() => onRemoveTodo(index)} aria-label="移除待办">×</button>
-        </div>,
-      );
-      return;
-    }
-    const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/);
-    if (ordered) {
-      blocks.push(<div className="list-row ordered" key={index}><span>{ordered[1]}.</span><InlineMarkdown text={ordered[2]} /></div>);
-      return;
-    }
-    const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
-    if (bullet) {
-      blocks.push(<div className="list-row" key={index}><span>•</span><InlineMarkdown text={bullet[1]} /></div>);
-      return;
-    }
-    if (line.startsWith(">")) {
-      blocks.push(<blockquote key={index}><InlineMarkdown text={line.replace(/^>\s?/, "")} /></blockquote>);
-      return;
-    }
-    blocks.push(<p key={index}><InlineMarkdown text={line} /></p>);
-  });
-
-  if (inCode && codeLines.length) blocks.push(<pre className="code-block" key={`code-${codeStart}`}><code>{codeLines.join("\n")}</code></pre>);
-  if (inFormula && formulaLines.length) blocks.push(<div className="formula-block" key="open-formula"><span className="formula-label">ƒx</span><code>{formulaLines.join(" ")}</code></div>);
-  return <div className="markdown-preview">{blocks}</div>;
-}
-
-function App() {
-  const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace);
-  const [activeClusterId, setActiveClusterId] = useState("inbox");
-  const [activeNoteId, setActiveNoteId] = useState("welcome");
-  const [mode, setMode] = useState<"split" | "write" | "preview">("split");
+export default function App() {
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+  const workspaceRef = useRef<Workspace | null>(null);
+  const pathRef = useRef("");
+  const queue = useRef(new SaveQueue());
+  const [dataDir, setDataDir] = useState("");
+  const [suggested, setSuggested] = useState("");
+  const [starting, setStarting] = useState(true);
+  const [setup, setSetup] = useState(false);
+  const [startupError, setStartupError] = useState("");
+  const [oldWorkspace, setOldWorkspace] = useState<Workspace | null>(null);
+  const [clusterId, setClusterId] = useState("");
+  const [noteId, setNoteId] = useState("");
   const [search, setSearch] = useState("");
-  const [quickMenu, setQuickMenu] = useState(false);
+  const [source, setSource] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const [folderDialog, setFolderDialog] = useState<"new" | "rename" | null>(null);
+  const [folderName, setFolderName] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
-  const [saved, setSaved] = useState(true);
-  const titleRef = useRef<HTMLInputElement>(null);
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
+  const [saveError, setSaveError] = useState("");
+  const saveVersion = useRef(0);
+  const title = useRef<HTMLInputElement>(null);
+  const editor = useRef<Editor | null>(null);
+  const closeNeeded = useRef(false);
+  const [, setEditorTick] = useState(0);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
-    setSaved(true);
-  }, [workspace]);
+  const load = useCallback((loaded: Loaded) => {
+    workspaceRef.current = loaded.workspace; pathRef.current = loaded.dataDir;
+    setWorkspace(loaded.workspace); setDataDir(loaded.dataDir);
+    setWorkspaceEpoch(epoch => epoch + 1); setSource(false); setSearch("");
+    setClusterId(loaded.workspace.clusters[0].id); setNoteId(loaded.workspace.clusters[0].notes[0]?.id || "");
+    setSetup(false); setSaveState("saved"); setSaveError(""); setStartupError("");
+    closeNeeded.current = false;
+  }, []);
+  const start = useCallback(async () => {
+    setStarting(true); setStartupError("");
+    try {
+      const state = await getStorageState();
+      setSuggested(state.suggestedDir);
+      if (state.dataDir) load(await readWorkspace());
+      else { setOldWorkspace(legacyWorkspace()); setSetup(true); }
+    } catch (e) { setStartupError(errorText(e)); }
+    finally { setStarting(false); }
+  }, [load]);
+  useEffect(() => { void start(); }, [start]);
 
-  const activeCluster = useMemo(() => workspace.clusters.find((cluster) => cluster.id === activeClusterId) || workspace.clusters[0], [workspace, activeClusterId]);
-  const activeNote = useMemo(() => activeCluster?.notes.find((note) => note.id === activeNoteId) || activeCluster?.notes[0], [activeCluster, activeNoteId]);
-  const visibleNotes = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return activeCluster?.notes || [];
-    return (activeCluster?.notes || []).filter((note) => `${note.title} ${note.content}`.toLowerCase().includes(needle));
-  }, [activeCluster, search]);
-  const stats = activeNote ? noteStats(activeNote.content) : { total: 0, done: 0 };
-
-  useEffect(() => {
-    if (!activeCluster) return;
-    if (!activeCluster.notes.some((note) => note.id === activeNoteId)) setActiveNoteId(activeCluster.notes[0]?.id || "");
-  }, [activeCluster, activeNoteId]);
-
+  const save = useCallback((next: Workspace) => {
+    const version = ++saveVersion.current;
+    setSaveState("saving"); setSaveError(""); closeNeeded.current = true;
+    void queue.current.save(pathRef.current, next).then(() => {
+      if (version === saveVersion.current) { setSaveState("saved"); closeNeeded.current = false; }
+    }).catch(e => {
+      if (version === saveVersion.current) { setSaveState("error"); setSaveError(errorText(e)); }
+    });
+  }, []);
+  const commit = useCallback((next: Workspace) => {
+    workspaceRef.current = next; setWorkspace(next); save(next);
+  }, [save]);
   const updateNote = useCallback((changes: Partial<Note>) => {
-    setSaved(false);
-    setWorkspace((previous) => ({
-      clusters: previous.clusters.map((cluster) => cluster.id !== activeClusterId ? cluster : {
-        ...cluster,
-        notes: cluster.notes.map((note) => note.id !== activeNoteId ? note : { ...note, ...changes, updatedAt: Date.now() }),
-      }),
-    }));
-  }, [activeClusterId, activeNoteId]);
-
+    const previous = workspaceRef.current;
+    if (!previous) return;
+    commit({ clusters: previous.clusters.map(c => c.id === clusterId ? {
+      ...c, notes: c.notes.map(n => n.id === noteId ? { ...n, ...changes, updatedAt: Date.now() } : n),
+    } : c) });
+  }, [clusterId, noteId, commit]);
   const updateContent = useCallback((content: string) => updateNote({ content }), [updateNote]);
-
-  const createNote = useCallback(() => {
-    const note: Note = { id: uid("note"), title: "未命名便签", content: "# 未命名便签\n\n开始记录你的想法……\n", color: colors[(activeCluster?.notes.length || 0) % colors.length], updatedAt: Date.now() };
-    setWorkspace((previous) => ({ clusters: previous.clusters.map((cluster) => cluster.id === activeClusterId ? { ...cluster, notes: [note, ...cluster.notes] } : cluster) }));
-    setActiveNoteId(note.id);
-    setSearch("");
-    window.setTimeout(() => titleRef.current?.select(), 30);
-  }, [activeCluster, activeClusterId]);
-
-  const deleteNote = useCallback(() => {
-    if (!activeNote || !activeCluster || activeCluster.notes.length <= 1) {
-      setToast("每个 note 夹至少保留一张便签");
-      return;
+  const cluster = workspace?.clusters.find(c => c.id === clusterId);
+  const note = cluster?.notes.find(n => n.id === noteId);
+  const visibleNotes = cluster?.notes.filter(n => !search.trim() || (n.title + "\n" + n.content).toLowerCase().includes(search.trim().toLowerCase())) || [];
+  const switchNote = (id: string) => { setNoteId(id); setSource(false); };
+  const addNote = useCallback(() => {
+    const current = workspaceRef.current;
+    if (!current || !clusterId) return;
+    const n = newNote();
+    commit({ clusters: current.clusters.map(c => c.id === clusterId ? { ...c, notes: [...c.notes, n] } : c) });
+    setSearch(""); setSource(false); setNoteId(n.id);
+    requestAnimationFrame(() => title.current?.select());
+  }, [clusterId, commit]);
+  const applyDirectory = async (path: string) => {
+    await queue.current.flush();
+    const seed = workspaceRef.current || oldWorkspace || createWorkspace();
+    const loaded = await changeDirectory(path, seed);
+    load(loaded); setStorageOpen(false);
+  };
+  const copy = async () => {
+    if (!note) return;
+    try { await navigator.clipboard.writeText(note.content); setToast("便签内容已复制"); }
+    catch (e) { setToast("复制失败：" + errorText(e)); }
+  };
+  const submitFolder = () => {
+    if (!workspace || !folderName.trim()) return;
+    if (folderDialog === "rename") commit({ clusters: workspace.clusters.map(c => c.id === clusterId ? { ...c, name: folderName.trim() } : c) });
+    else {
+      const c = { id: uid(), name: folderName.trim(), color: colors[workspace.clusters.length % colors.length], icon: "folder", notes: [newNote()] };
+      commit({ clusters: [...workspace.clusters, c] }); setClusterId(c.id); setNoteId(c.notes[0].id); setSearch(""); setSource(false);
     }
-    if (!window.confirm(`删除「${activeNote.title}」？`)) return;
-    const remaining = activeCluster.notes.filter((note) => note.id !== activeNote.id);
-    setWorkspace((previous) => ({ clusters: previous.clusters.map((cluster) => cluster.id === activeClusterId ? { ...cluster, notes: remaining } : cluster) }));
-    setActiveNoteId(remaining[0].id);
-  }, [activeCluster, activeClusterId, activeNote]);
-
-  const duplicateNote = useCallback(() => {
-    if (!activeNote) return;
-    const note: Note = { ...activeNote, id: uid("note"), title: `${activeNote.title} · 副本`, updatedAt: Date.now() };
-    setWorkspace((previous) => ({ clusters: previous.clusters.map((cluster) => cluster.id === activeClusterId ? { ...cluster, notes: [note, ...cluster.notes] } : cluster) }));
-    setActiveNoteId(note.id);
-    setToast("已复制 note");
-  }, [activeClusterId, activeNote]);
-
-  const addCluster = () => {
-    const name = window.prompt("新建 note 夹名称", "新 note 夹")?.trim();
-    if (!name) return;
-    const cluster: Cluster = { id: uid("cluster"), name, icon: "✧", color: colors[workspace.clusters.length % colors.length], notes: [{ id: uid("note"), title: "第一张便签", content: "# 第一张便签\n\n", color: colors[workspace.clusters.length % colors.length], updatedAt: Date.now() }] };
-    setWorkspace((previous) => ({ clusters: [...previous.clusters, cluster] }));
-    setActiveClusterId(cluster.id);
-    setActiveNoteId(cluster.notes[0].id);
+    setFolderDialog(null);
   };
-
-  const removeTodo = (lineIndex: number) => updateContent(activeNote?.content.split("\n").filter((_, index) => index !== lineIndex).join("\n") || "");
-  const toggleTodo = (lineIndex: number) => {
-    if (!activeNote) return;
-    const lines = activeNote.content.split("\n");
-    lines[lineIndex] = lines[lineIndex].replace(/\[([ xX])\]/, (_, mark: string) => mark.toLowerCase() === "x" ? "[ ]" : "[x]");
-    updateContent(lines.join("\n"));
+  const deleteNote = () => {
+    if (!workspace || !cluster || !note) return;
+    const notes = cluster.notes.filter(n => n.id !== note.id);
+    commit({ clusters: workspace.clusters.map(c => c.id === clusterId ? { ...c, notes } : c) });
+    setNoteId(notes[0]?.id || ""); setDeleting(false); setSource(false);
   };
-  const clearCompleted = () => {
-    if (!activeNote) return;
-    const next = activeNote.content.split("\n").filter((line) => !/^\s*[-*]\s+\[[xX]\]\s+/.test(line)).join("\n");
-    updateContent(next);
-    setToast("已清除完成的待办");
-  };
-  const copyNote = async () => {
-    if (!activeNote) return;
-    await navigator.clipboard?.writeText(activeNote.content);
-    setToast("note 全文已复制");
-  };
-
-  const insertBlock = (kind: "todo" | "formula") => {
-    if (!activeNote) return;
-    const block = kind === "todo" ? "- [ ] 新待办" : "$$\n\\text{write your formula here}\n$$";
-    const content = /\/[^\n]*$/.test(activeNote.content) ? activeNote.content.replace(/\/[^\n]*$/, block) : `${activeNote.content.replace(/\s*$/, "")}\n\n${block}`;
-    updateContent(content.endsWith("\n") ? content : `${content}\n`);
-    setQuickMenu(false);
-    setMode("split");
-  };
-
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const command = event.ctrlKey || event.metaKey;
-      if (command && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setQuickMenu((open) => !open);
-      }
-      if (command && event.shiftKey && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        createNote();
-      }
-      if (command && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        setSaved(true);
-      }
-      if (event.key === "Escape") setQuickMenu(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [createNote]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setToast(""), 2200);
-    return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => setToast(""), 3000); return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.isComposing || setup || storageOpen || folderDialog || deleting) return;
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); addNote(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault(); if (workspaceRef.current) save(workspaceRef.current);
+      }
+    };
+    window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
+  }, [addNote, save, setup, storageOpen, folderDialog, deleting]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    if (desktop) {
+      void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
+        const win = getCurrentWindow();
+        const dispose = await win.onCloseRequested(async event => {
+          if (!closeNeeded.current) return;
+          event.preventDefault();
+          try { await queue.current.flush(); closeNeeded.current = false; await win.destroy(); }
+          catch (e) { setSaveState("error"); setSaveError("关闭前保存失败：" + errorText(e)); }
+        });
+        if (cancelled) dispose(); else unlisten = dispose;
+      });
+    }
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (closeNeeded.current) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  const attachEditor = useCallback((instance: Editor | null) => {
+    editor.current = instance;
+    if (instance) instance.on("transaction", () => setEditorTick(t => t + 1));
+    setEditorTick(t => t + 1);
+  }, []);
 
-  const isSlashCommand = activeNote?.content.split("\n").slice(-1)[0]?.match(/^\s*\/[^\s]*$/);
-  if (!activeCluster || !activeNote) return null;
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-mark"><span className="brand-orbit">✦</span><div><strong>DeskTodo</strong><span>桌面便签 · local first</span></div></div>
-        <div className="topbar-search"><Icon>⌕</Icon><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索所有便签…" /><kbd>⌘ K</kbd></div>
-        <div className="topbar-actions"><span className="sync-state"><i className={saved ? "synced" : "saving"} />{saved ? "已保存" : "正在保存"}</span><button className="round-button" onClick={() => setQuickMenu(true)} aria-label="打开快捷菜单">⌘</button><div className="avatar">D</div></div>
-      </header>
-      <div className="app-body">
-        <aside className="cluster-sidebar">
-          <div className="sidebar-heading"><span>NOTE 夹</span><button onClick={addCluster} aria-label="新建 note 夹">＋</button></div>
-          <nav className="cluster-list">
-            {workspace.clusters.map((cluster) => {
-              const clusterStats = cluster.notes.reduce((sum, note) => sum + noteStats(note.content).total, 0);
-              return <button key={cluster.id} className={`cluster-item ${cluster.id === activeCluster.id ? "active" : ""}`} style={{ "--cluster-color": cluster.color } as React.CSSProperties} onClick={() => { setActiveClusterId(cluster.id); setActiveNoteId(cluster.notes[0]?.id || ""); }}><span className="cluster-icon">{cluster.icon}</span><span className="cluster-copy"><b>{cluster.name}</b><small>{cluster.notes.length} notes · {clusterStats} 待办</small></span>{cluster.id === activeCluster.id && <span className="active-pip" />}</button>;
-            })}
-          </nav>
-          <div className="sidebar-bottom"><div className="shortcut-card"><span className="sparkle">✦</span><div><b>保持流动</b><small>输入 / 插入块</small></div><kbd>/</kbd></div><div className="sidebar-footer"><span>⌘ 2026 DeskTodo</span><button onClick={() => setToast("所有数据保存在当前设备")}>隐私</button></div></div>
-        </aside>
-        <main className="workspace">
-          <section className="note-strip-head"><div><span className="eyebrow">{activeCluster.icon} {activeCluster.name}</span><h1>你的便签</h1></div><div className="note-strip-actions"><span className="note-count">{visibleNotes.length} / {activeCluster.notes.length}</span><button className="primary-button" onClick={createNote}><Icon>＋</Icon> 新 note <kbd>⌘ ⇧ N</kbd></button></div></section>
-          <section className="note-rail" aria-label="便签列表">
-            {visibleNotes.map((note) => { const itemStats = noteStats(note.content); return <button key={note.id} className={`note-card ${note.id === activeNote.id ? "selected" : ""}`} style={{ "--note-color": note.color } as React.CSSProperties} onClick={() => setActiveNoteId(note.id)}><span className="note-card-line" /><span className="note-card-title">{note.title}</span><span className="note-card-preview">{note.content.replace(/[#>*`\[\]]/g, "").replace(/\n/g, " ").slice(0, 76)}</span><span className="note-card-meta"><span>{itemStats.total ? `${itemStats.done}/${itemStats.total} done` : "无待办"}</span><time>{formatTime(note.updatedAt)}</time></span></button>; })}
-            <button className="new-note-card" onClick={createNote}><span>＋</span><small>新建便签</small></button>
-          </section>
-          <section className="editor-shell">
-            <div className="editor-toolbar"><div className="editor-title"><span className="note-dot" style={{ background: activeNote.color }} /><input ref={titleRef} value={activeNote.title} onChange={(event) => updateNote({ title: event.target.value })} aria-label="便签标题" /></div><div className="toolbar-actions"><button className={`toolbar-button ${mode === "write" ? "active" : ""}`} onClick={() => setMode("write")}>写作</button><button className={`toolbar-button ${mode === "split" ? "active" : ""}`} onClick={() => setMode("split")}>分屏</button><button className={`toolbar-button ${mode === "preview" ? "active" : ""}`} onClick={() => setMode("preview")}>预览</button><span className="toolbar-divider" /><button className="icon-button" onClick={copyNote} aria-label="复制全文">⧉</button><button className="icon-button" onClick={duplicateNote} aria-label="复制 note">⧉+</button><button className="icon-button danger" onClick={deleteNote} aria-label="删除 note">⌫</button></div></div>
-            <div className={`editor-content mode-${mode}`}>
-              {mode !== "preview" && <div className="write-pane"><div className="pane-label"><span>MARKDOWN</span><span>自动保存</span></div><textarea value={activeNote.content} onChange={(event) => { updateContent(event.target.value); setQuickMenu(isSlashCommand !== undefined || event.target.value.split("\n").slice(-1)[0]?.startsWith("/") === true); }} onFocus={() => setQuickMenu(Boolean(isSlashCommand))} placeholder="从一个想法开始…" spellCheck={false} /></div>}
-              {mode === "split" && <div className="pane-divider" />}
-              {mode !== "write" && <div className="preview-pane"><div className="pane-label"><span>LIVE PREVIEW</span><span className="preview-indicator"><i />即时渲染</span></div><MarkdownPreview content={activeNote.content} onToggleTodo={toggleTodo} onRemoveTodo={removeTodo} /></div>}
+  if (starting) return <div className="center-screen"><img src="/app-icon.svg" width="56" alt="" /><p>正在打开便签…</p></div>;
+  if (startupError) return <div className="center-screen"><div className="setup-card"><h1>暂时无法读取便签</h1><p className="form-error" role="alert">{startupError}</p><p className="hint">原数据已保留。请检查目录是否可用，或从数据目录中的备份恢复。</p><div className="modal-actions">{desktop && <button className="button" onClick={() => setStorageOpen(true)}>选择其他数据目录</button>}<button className="button primary" onClick={() => void start()}>重试</button></div></div>{storageOpen && <Modal title="选择其他数据目录" onClose={() => setStorageOpen(false)}><DirectoryForm suggested={suggested} migrating={false} onApply={applyDirectory} onCancel={() => setStorageOpen(false)} /></Modal>}</div>;
+  if (setup) return <div className="center-screen"><div className="setup-card">
+    <img className="setup-icon" src="/app-icon.svg" width="74" height="74" alt="DeskTodo" />
+    <p className="eyebrow">DESKTODO</p><h1>给想法一个落脚点</h1>
+    <p className="setup-copy">一张便签，一点思路。{oldWorkspace ? "检测到旧版便签，选择目录即可迁入。" : "先为你的便签选择一个本地目录。"}</p>
+    <DirectoryForm suggested={suggested} migrating={!!oldWorkspace} onApply={applyDirectory} />
+  </div></div>;
+  if (!workspace || !cluster) return null;
+  return <div className="app-shell">
+    <header className="topbar"><div className="brand"><img src="/app-icon.svg" width="33" height="33" alt="" /><strong>DeskTodo</strong><span>随手记，慢慢做。</span></div>
+      <div className="save-status" role="status" data-state={saveState}><i />{saveState === "saved" ? "已保存" : saveState === "saving" ? "正在保存…" : "未能保存"}</div>
+    </header>
+    <div className="app-body">
+      <aside className="sidebar">
+        <div className="sidebar-label"><span>NOTE 夹</span><button className="icon-button" aria-label="新建 note 夹" title="新建 note 夹" onClick={() => { setFolderName(""); setFolderDialog("new"); }}><Icon name="plus" size={16} /></button></div>
+        <nav className="folder-list" aria-label="Note 夹">{workspace.clusters.map(c => <button className={"folder" + (c.id === clusterId ? " active" : "")} key={c.id} style={{ "--folder-color": c.color } as CSSProperties} onClick={() => { setClusterId(c.id); switchNote(c.notes[0]?.id || ""); setSearch(""); }}>
+          <Icon name="folder" /><span>{c.name}</span><small>{c.notes.length}</small>
+        </button>)}</nav>
+        <button className="storage-button" onClick={() => setStorageOpen(true)}><Icon name="settings" size={16} /><span>数据目录<small>{desktop ? "保存在此设备" : "浏览器预览"}</small></span></button>
+      </aside>
+      <main className="workspace">
+        <div className="workspace-head"><div className="breadcrumb"><Icon name="folder" size={15} /><span>{cluster.name}</span><button className="icon-button" aria-label="重命名 note 夹" onClick={() => { setFolderName(cluster.name); setFolderDialog("rename"); }}><Icon name="edit" size={13} /></button></div>
+          <label className="search"><Icon name="search" size={15} /><input aria-label="搜索当前 note 夹" placeholder="搜索此夹…" value={search} onChange={e => setSearch(e.target.value)} /></label>
+        </div>
+        <div className="tabs-row"><nav className="note-tabs" aria-label="夹内便签切换">{visibleNotes.map(n => <button key={n.id} className={n.id === noteId ? "selected" : ""} aria-current={n.id === noteId ? "page" : undefined} title={n.title} onClick={() => switchNote(n.id)}>{n.title || "未命名便签"}</button>)}{search && !visibleNotes.length && <span className="no-results">没有匹配的便签</span>}</nav>
+          <button className="icon-button new-note" title="新建便签 · Ctrl+Shift+N" aria-label="新建便签" onClick={addNote}><Icon name="plus" /></button>
+        </div>
+        {saveError && <div className="save-error" role="alert"><span>{saveError}</span><button onClick={() => workspaceRef.current && save(workspaceRef.current)}>重试保存</button></div>}
+        {note ? <section className="note-sheet">
+          <header className="note-toolbar"><input ref={title} className="note-title" aria-label="便签标题" placeholder="未命名便签" value={note.title} onChange={e => updateNote({ title: e.target.value })} />
+            <div className="note-actions">
+              <button className="icon-button" aria-label="撤销" title="撤销 · Ctrl+Z" disabled={source || !editor.current?.can().undo()} onClick={() => editor.current?.chain().focus().undo().run()}><Icon name="undo" size={16} /></button>
+              <button className="icon-button" aria-label="重做" title="重做 · Ctrl+Shift+Z" disabled={source || !editor.current?.can().redo()} onClick={() => editor.current?.chain().focus().redo().run()}><Icon name="redo" size={16} /></button>
+              <span className="divider" />
+              <button className={"icon-button" + (source ? "active" : "")} aria-label={source ? "返回即时编辑" : "查看 Markdown"} title={source ? "返回即时编辑" : "Markdown 源码"} onClick={() => setSource(v => !v)}><Icon name={source ? "edit" : "code"} size={16} /></button>
+              <button className="icon-button" aria-label="复制便签内容" title="复制 Markdown 内容" onClick={() => void copy()}><Icon name="copy" size={16} /></button>
+              <button className="icon-button danger" aria-label="删除便签" title="删除便签" onClick={() => setDeleting(true)}><Icon name="trash" size={16} /></button>
             </div>
-            {quickMenu && <div className="quick-menu"><div className="quick-menu-head"><span>快速插入</span><kbd>ESC</kbd></div><button onClick={() => insertBlock("todo")}><span className="menu-symbol checkbox-symbol">☑</span><span><b>待办块</b><small>插入一行可交互待办</small></span><kbd>/todo</kbd></button><button onClick={() => insertBlock("formula")}><span className="menu-symbol">ƒx</span><span><b>公式块</b><small>为公式、转换插件预留</small></span><kbd>/formula</kbd></button><div className="quick-menu-tip">也可以在编辑器新行输入 <code>/</code></div></div>}
-            <footer className="editor-footer"><div className="footer-stats"><span><b>{activeNote.content.length}</b> 字符</span><span><b>{activeNote.content.split("\n").length}</b> 行</span><span className="todo-stat"><i />{stats.done}/{stats.total} 待办完成</span></div><div className="footer-actions"><button onClick={clearCompleted} disabled={!stats.done}>清除已完成</button><span>最后编辑于 {formatTime(activeNote.updatedAt)}</span></div></footer>
-          </section>
-        </main>
-      </div>
-      {toast && <div className="toast"><span>✦</span>{toast}</div>}
+          </header>
+          <div className="document-scroll" key={workspaceEpoch + ":" + note.id}>
+            {source ? <textarea className="markdown-source" aria-label="Markdown 源码" value={note.content} spellCheck={false} onChange={e => updateContent(e.target.value)} />
+              : <NoteEditor key={note.id} content={note.content} onChange={updateContent} onReady={attachEditor} />}
+          </div>
+          <footer className="note-footer"><span>{source ? "Markdown" : "即时编辑"}<i />{note.content.length} 字符</span><span>编辑于 {new Date(note.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span></footer>
+        </section> : <section className="empty-note"><Icon name="edit" size={32} /><h2>给这个夹写第一张便签</h2><button className="button primary" onClick={addNote}>新建便签</button></section>}
+      </main>
     </div>
-  );
+    {storageOpen && <Modal title="数据目录" onClose={() => setStorageOpen(false)}><DirectoryForm current={dataDir} suggested={suggested} migrating onApply={applyDirectory} onCancel={() => setStorageOpen(false)} /></Modal>}
+    {folderDialog && <Modal title={folderDialog === "new" ? "新建 note 夹" : "重命名 note 夹"} onClose={() => setFolderDialog(null)}><form onSubmit={e => { e.preventDefault(); submitFolder(); }}><label className="field"><span>名称</span><input aria-label="Note 夹名称" value={folderName} onChange={e => setFolderName(e.target.value)} maxLength={80} /></label><div className="modal-actions"><button type="button" className="button" onClick={() => setFolderDialog(null)}>取消</button><button className="button primary" disabled={!folderName.trim()}>保存</button></div></form></Modal>}
+    {deleting && <Modal title="删除便签" onClose={() => setDeleting(false)}><p className="hint">将删除「{note?.title || "未命名便签"}」及其内容。</p><div className="modal-actions"><button className="button" onClick={() => setDeleting(false)}>取消</button><button className="button danger-solid" onClick={deleteNote}>确认删除</button></div></Modal>}
+    {toast && <div className="toast" role="status">{toast}</div>}
+  </div>;
 }
-
-export default App;

@@ -1,6 +1,6 @@
 # DeskToolkit
 
-DeskToolkit 包含三个相互独立的桌面小工具，当前代码中的功能如下。
+DeskToolkit 包含四个相互独立的桌面小工具，当前代码中的功能如下。
 
 ## 项目
 

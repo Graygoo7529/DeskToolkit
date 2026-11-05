@@ -1,0 +1,56 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { CACHE_KEY, LEGACY_KEY, parseWorkspace, type Workspace } from "./model";
+
+export const desktop = isTauri();
+export interface StorageState { dataDir: string | null; suggestedDir: string }
+export interface Loaded { dataDir: string; workspace: Workspace }
+const BROWSER_PATH = "浏览器本地存储";
+export async function getStorageState(): Promise<StorageState> {
+  if (desktop) return invoke("get_state");
+  return { dataDir: localStorage.getItem("desktodo-browser-ready") ? BROWSER_PATH : null, suggestedDir: BROWSER_PATH };
+}
+export function legacyWorkspace(): Workspace | null {
+  // Keep both old keys intact after migration.
+  const raw = localStorage.getItem(CACHE_KEY) || localStorage.getItem(LEGACY_KEY);
+  return raw ? parseWorkspace(raw) : null;
+}
+export async function readWorkspace(): Promise<Loaded> {
+  if (desktop) return invoke("load_workspace");
+  const raw = localStorage.getItem(CACHE_KEY);
+  if (!raw) throw new Error("本地数据不存在，请重新选择数据目录。");
+  return { dataDir: BROWSER_PATH, workspace: parseWorkspace(raw) };
+}
+export async function changeDirectory(path: string, seed: Workspace): Promise<Loaded> {
+  if (desktop) return invoke("set_data_dir", { path, seed });
+  localStorage.setItem(CACHE_KEY, JSON.stringify(seed));
+  localStorage.setItem("desktodo-browser-ready", "yes");
+  return { dataDir: BROWSER_PATH, workspace: seed };
+}
+export async function persist(path: string, workspace: Workspace) {
+  if (desktop) await invoke("save_workspace", { path, workspace });
+  else localStorage.setItem(CACHE_KEY, JSON.stringify(workspace));
+}
+export async function browseDirectory(): Promise<string | null> {
+  if (!desktop) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const chosen = await open({ directory: true, multiple: false, title: "选择 DeskTodo 数据目录" });
+  return typeof chosen === "string" ? chosen : null;
+}
+export async function openDirectory() {
+  if (desktop) await invoke("open_data_dir");
+}
+// Serialize writes and coalesce pending typing; never issue a late write after a directory switch.
+export class SaveQueue {
+  private tail: Promise<void> = Promise.resolve();
+  private revision = 0;
+  save(path: string, workspace: Workspace): Promise<void> {
+    const ticket = ++this.revision;
+    const task = this.tail.catch(() => undefined).then(async () => {
+      if (ticket === this.revision) await persist(path, workspace);
+    });
+    this.tail = task;
+    return task;
+  }
+  async flush() { await this.tail; }
+}
+
