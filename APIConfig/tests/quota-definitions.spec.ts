@@ -15,7 +15,7 @@ async function openProbe(page: Page, mode: 'daily' | 'balance' | 'missing' | 'fa
       endpoints: [{ protocol: 'openai', url: 'https://fixture.example/v1', auth_mode: 'auto' }],
       quota_adapter: 'fixture', quota,
     }
-    const state = { homes: [], providers: [], claude_homes: [], claude_providers: [], statuses: {}, claude_statuses: {}, data_dir: 'D:\\Fixture' }
+    const state = { homes: [], providers: [], claude_homes: [], claude_providers: [], statuses: {}, claude_statuses: {}, data_dir: 'D:\\Fixture', proxy: { enabled: true, https_proxy: 'http://127.0.0.1:7897', https_proxys: 'http://127.0.0.1:7897' } }
     const result = { status: 'ok', checked_at: Date.now(), latency_ms: 12, http_status: 200, models: [], quota: null, message: '完成' }
     ;(window as any).__quotaCalls = []
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (cmd: string, args: any) => {

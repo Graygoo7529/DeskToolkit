@@ -2,17 +2,9 @@
 use crate::{api_definitions, inspection};
 use reqwest::{Client, Url};
 use serde_json::Value;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
-static HTTP: std::sync::LazyLock<Client> = std::sync::LazyLock::new(|| {
-    Client::builder()
-        .timeout(Duration::from_secs(12))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("APIConfig/0.2")
-        .build()
-        .expect("quota HTTP client")
-});
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -136,6 +128,7 @@ pub(crate) fn query_url(base: &str, path: &str) -> Result<Url, String> {
 }
 
 async fn request_json(
+    client: &Client,
     url: Url,
     key: &str,
     method: &str,
@@ -149,11 +142,12 @@ async fn request_json(
             } else {
                 serde_json::from_str(body).map_err(|_| "POST Body 不是合法 JSON")?
             };
-            HTTP.post(url)
+            client
+                .post(url)
                 .header("content-type", "application/json")
                 .json(&value)
         }
-        _ => HTTP.get(url),
+        _ => client.get(url),
     };
     let response = inspection::authorize(request, key, auth, inspection::AuthTarget::Quota)
         .send()
@@ -302,9 +296,14 @@ pub async fn query(
     key: &str,
     profile: &str,
     registry: &crate::api_definitions::Registry,
+    proxy: &crate::network::ProxySettings,
 ) -> inspection::ProbeResult {
     let _slot = SLOTS.acquire().await.expect("quota semaphore");
     let start = Instant::now();
+    let client = match crate::network::client(proxy, "APIConfig/0.2") {
+        Ok(client) => client,
+        Err(error) => return result("error", error, None, start),
+    };
     let profile = profile.trim();
     if profile.is_empty() || profile == "none" {
         return result("skipped", "未配置额度查询适配器", None, start);
@@ -319,6 +318,7 @@ pub async fn query(
         Err(error) => return result("error", error, None, start),
     };
     match request_json(
+        &client,
         url,
         key,
         &definition.request_method,
@@ -350,6 +350,7 @@ pub async fn query(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn generated_profile_is_shared_and_account_base_validates_path() {
@@ -391,10 +392,17 @@ mod tests {
     async fn shared_query_uses_profile_method_path_and_account_key() {
         use std::io::{Read, Write};
         let registry = crate::api_definitions::source_registry_for_tests();
+        let proxy = crate::network::ProxySettings::disabled();
         assert_eq!(
-            query("http://127.0.0.1:1", "fixture-key", "none", &registry)
-                .await
-                .status,
+            query(
+                "http://127.0.0.1:1",
+                "fixture-key",
+                "none",
+                &registry,
+                &proxy,
+            )
+            .await
+            .status,
             "skipped"
         );
         for (profile, method, path, body) in [
@@ -442,7 +450,8 @@ mod tests {
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
                 String::from_utf8(request).unwrap()
             });
-            let result = query(&base, "fixture-key", profile, &registry).await;
+            let proxy = crate::network::ProxySettings::disabled();
+            let result = query(&base, "fixture-key", profile, &registry, &proxy).await;
             let request = handle.join().unwrap().to_lowercase();
             assert!(request.starts_with(&format!("{method} {path} ").to_lowercase()));
             assert!(request.contains("authorization: bearer fixture-key"));

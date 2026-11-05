@@ -254,11 +254,12 @@ pub async fn probe_api_account(app: AppHandle, id: String) -> Result<ApiProbeRes
             .find(|a| a.name == name)
             .ok_or("API 不存在，请刷新后重试")?
     };
+    let proxy = data::load_proxy_settings(&app)?;
     let mut model_sets = Vec::new();
     for endpoint in &account.endpoints {
         model_sets.push(api_probe::ProtocolModels {
             protocol: endpoint.protocol,
-            result: api_probe::discover(endpoint, &account.key).await,
+            result: api_probe::discover(endpoint, &account.key, &proxy).await,
         });
     }
     let quota = if account.quota.profile.trim().is_empty() || account.quota.profile == "none" {
@@ -271,6 +272,7 @@ pub async fn probe_api_account(app: AppHandle, id: String) -> Result<ApiProbeRes
                 &account.key,
                 &account.quota.profile,
                 &registry,
+                &proxy,
             )
             .await,
         )
@@ -293,11 +295,12 @@ pub async fn check_api_model(
             .find(|a| a.name == name)
             .ok_or("API 不存在，请刷新后重试")?
     };
+    let proxy = data::load_proxy_settings(&app)?;
     let protocol = api_probe::parse_protocol(&protocol).ok_or("未知接口协议")?;
     let endpoint = account
         .endpoints
         .iter()
         .find(|e| e.protocol == protocol)
         .ok_or("此账号未配置该接口协议")?;
-    Ok(api_probe::check(endpoint, &account.key, &model).await)
+    Ok(api_probe::check(endpoint, &account.key, &model, &proxy).await)
 }

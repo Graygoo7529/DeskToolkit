@@ -38,6 +38,19 @@ button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline:
 .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; transition: color .15s, background .15s; }
 .icon-btn:not(:disabled):hover { color: var(--text); background: #ffffff08; }
 .data-button { width: auto; gap: 8px; margin-left: auto; padding: 7px 8px; font-size: 11px; white-space: nowrap; }
+.proxy-control { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.proxy-control + .data-button { margin-left: 8px; }
+.proxy-toggle { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #303c50; border-radius: 8px; padding: 7px 10px; color: #8998b1; background: #141d2a; font-size: 11px; white-space: nowrap; }
+.proxy-toggle:hover:not(:disabled) { border-color: #546386; color: #d0daec; background: #202a3c; }
+.proxy-toggle.active { border-color: #406451; color: #92d0b4; background: #172a28; }
+.proxy-dot { width: 6px; height: 6px; border-radius: 50%; background: #69768d; }
+.proxy-toggle.active .proxy-dot { background: #70d6b3; box-shadow: 0 0 8px #70d6b355; }
+.proxy-settings { color: #8490a5; }
+.proxy-description { margin: -5px 0 22px; }
+.proxy-switch-row { display: flex; align-items: center; gap: 10px; margin: 0 0 21px; color: #c3cee1; font-size: 12px; }
+.proxy-switch-row input { accent-color: #8e9de2; }
+.proxy-switch-row span { display: grid; gap: 4px; }
+.proxy-switch-row small { color: #7c8da8; font-size: 10px; }
 .page-content, .scene-page { flex: 1; min-height: 0; }
 .scene-page { height: 100%; }
 .scene-workspace { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(440px, 1.2fr); height: 100%; gap: 22px; }
@@ -330,7 +343,8 @@ fieldset h4 { font-size: 12px; font-weight: 500; color: #c5d2eb; margin: 18px 0;
   .topbar { flex-wrap: wrap; gap: 12px; padding: 15px 0; min-height: 115px; }
   .brand { flex: 1; }
   .brand-note { display: none; }
-  .data-button { order: 1; }
+  .proxy-control { order: 1; margin-left: 0; }
+  .data-button { order: 1; margin-left: auto; }
   .page-tabs { order: 2; width: 100%; }
   .page-tab { flex: 1; justify-content: center; }
   .scene-workspace { display: flex; flex-direction: column; gap: 12px; }

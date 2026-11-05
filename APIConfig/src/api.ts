@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { State, Scene, ProbeTask, ProbeResult, InspectionInput, ApiAccount, ApiProbeResult, ApiEndpoint, QuotaInput, ApiProbeProfile } from './types'
+import type { State, Scene, ProbeTask, ProbeResult, InspectionInput, ApiAccount, ApiProbeResult, ApiEndpoint, QuotaInput, ApiProbeProfile, ProxySettings } from './types'
 
 export const getState = () => invoke<State>('get_state')
+export const saveProxySettings = (settings: ProxySettings) => invoke<State>('save_proxy_settings', { settings })
 
 export const saveHome = (originalName: string | null, name: string, location: string) =>
   invoke<State>('save_home', { originalName, name, location })

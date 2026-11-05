@@ -5,6 +5,7 @@ mod claude;
 mod codex;
 mod data;
 mod inspection;
+mod network;
 mod quota;
 
 use data::{ClaudeHome, ClaudeProvider, Home, Provider};
@@ -21,6 +22,7 @@ struct State {
     claude_homes: Vec<ClaudeHome>,
     claude_providers: Vec<ProviderView>,
     claude_statuses: HashMap<String, claude::ClaudeStatus>,
+    proxy: network::ProxySettings,
 }
 
 #[derive(Serialize)]
@@ -82,6 +84,7 @@ fn assemble(app: &AppHandle) -> Result<State, String> {
         })
         .collect();
     let data_dir = data::data_dir(app)?.display().to_string();
+    let proxy = data::load_proxy_settings(app)?;
     Ok(State {
         homes,
         providers: provider_views,
@@ -90,6 +93,7 @@ fn assemble(app: &AppHandle) -> Result<State, String> {
         claude_homes,
         claude_providers: claude_provider_views,
         claude_statuses,
+        proxy,
     })
 }
 
@@ -135,6 +139,13 @@ fn upsert<T>(
 #[tauri::command]
 fn get_state(app: AppHandle) -> Result<State, String> {
     let _guard = data::lock()?;
+    assemble(&app)
+}
+
+#[tauri::command]
+fn save_proxy_settings(app: AppHandle, settings: network::ProxySettings) -> Result<State, String> {
+    let _guard = data::lock()?;
+    data::save_proxy_settings(&app, &settings)?;
     assemble(&app)
 }
 
@@ -473,6 +484,7 @@ async fn inspect_provider(
             .find(|p| p.name == name)
             .ok_or("Provider 已被删除，请刷新后重试")?
     };
+    let proxy = data::load_proxy_settings(&app)?;
     Ok(match task {
         inspection::Task::Quota => {
             let registry = api_definitions::load_for_app(&app)?;
@@ -481,6 +493,7 @@ async fn inspect_provider(
                 &provider.key,
                 &provider.inspection.quota.profile,
                 &registry,
+                &proxy,
             )
             .await
         }
@@ -489,6 +502,7 @@ async fn inspect_provider(
                 provider,
                 matches!(scene, Scene::Claude),
                 task == inspection::Task::Connection,
+                &proxy,
             )
             .await
         }
@@ -621,6 +635,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_state,
+            save_proxy_settings,
             save_home,
             delete_home,
             save_provider,

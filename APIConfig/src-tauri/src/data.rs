@@ -8,7 +8,10 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+use crate::network::ProxySettings;
+
 pub const FILES: [&str; 3] = ["codex.toml", "claude.toml", "apis.toml"];
+const PROXY_FILE: &str = "proxy.json";
 const KIMI_LEGACY: &str = "kimi.toml";
 const LEGACY: [&str; 5] = [
     "homes.toml",
@@ -176,6 +179,27 @@ pub fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
     temp.persist(path)
         .map_err(|_| "无法替换配置文件，请检查文件权限或占用")?;
     Ok(())
+}
+
+/// Load the application-level proxy setting. It intentionally lives beside
+/// `storage.json`, rather than inside the selected data directory, so changing
+/// the data directory does not silently change how the three panels connect.
+pub fn load_proxy_settings(app: &AppHandle) -> Result<ProxySettings, String> {
+    let path = default_dir(app)?.join(PROXY_FILE);
+    if !path.exists() {
+        return Ok(ProxySettings::default());
+    }
+    let text = fs::read_to_string(path).map_err(|_| "无法读取代理设置".to_string())?;
+    serde_json::from_str(&text).map_err(|_| "代理设置格式无效".to_string())
+}
+
+pub fn save_proxy_settings(app: &AppHandle, settings: &ProxySettings) -> Result<(), String> {
+    settings.validate()?;
+    let dir = default_dir(app)?;
+    fs::create_dir_all(&dir).map_err(|_| "无法创建应用配置目录".to_string())?;
+    let text =
+        serde_json::to_string_pretty(settings).map_err(|_| "无法生成代理设置".to_string())?;
+    atomic_write(&dir.join(PROXY_FILE), &text)
 }
 fn read<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
     let text = fs::read_to_string(path).map_err(|_| format!("无法读取 {}", path.display()))?;

@@ -4,7 +4,7 @@ use crate::{data, inspection};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -93,15 +93,6 @@ pub struct ProtocolModels {
     pub result: inspection::ProbeResult,
 }
 
-static HTTP: std::sync::LazyLock<Client> = std::sync::LazyLock::new(|| {
-    Client::builder()
-        .timeout(Duration::from_secs(12))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("APIConfig/0.2")
-        .build()
-        .expect("APIConfig HTTP client")
-});
-
 pub fn protocol_name(protocol: Protocol) -> &'static str {
     match protocol {
         Protocol::Openai => "openai",
@@ -164,12 +155,13 @@ fn endpoint(base: &str, leaf: &str) -> Result<Url, String> {
 }
 
 async fn get_json(
+    client: &Client,
     url: Url,
     key: &str,
     auth: inspection::Auth,
     target: inspection::AuthTarget,
 ) -> Result<(Value, u16), String> {
-    let response = inspection::authorize(HTTP.get(url), key, auth, target)
+    let response = inspection::authorize(client.get(url), key, auth, target)
         .send()
         .await
         .map_err(|_| "请求失败，请检查网络、地址和认证设置")?;
@@ -225,7 +217,11 @@ fn generic_models(body: &Value) -> Vec<inspection::Model> {
         .collect()
 }
 
-pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::ProbeResult {
+pub async fn discover(
+    endpoint_config: &ApiEndpoint,
+    key: &str,
+    proxy: &crate::network::ProxySettings,
+) -> inspection::ProbeResult {
     let start = Instant::now();
     match endpoint_config.protocol {
         Protocol::Openai | Protocol::OpenaiResponses => {
@@ -238,7 +234,7 @@ pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::P
                 color: String::new(),
                 inspection: settings,
             };
-            inspection::inspect_models(provider, false, false).await
+            inspection::inspect_models(provider, false, false, proxy).await
         }
         Protocol::Anthropic => {
             let mut settings = inspection::InspectionSettings::default();
@@ -250,11 +246,16 @@ pub async fn discover(endpoint_config: &ApiEndpoint, key: &str) -> inspection::P
                 color: String::new(),
                 inspection: settings,
             };
-            inspection::inspect_models(provider, true, false).await
+            inspection::inspect_models(provider, true, false, proxy).await
         }
         Protocol::Genai => match direct_leaf(&endpoint_config.url, "models") {
             Ok(url) => {
+                let client = match crate::network::client(proxy, "APIConfig/0.2") {
+                    Ok(client) => client,
+                    Err(error) => return result("error", error, None, start),
+                };
                 match get_json(
+                    &client,
                     url,
                     key,
                     endpoint_config.auth_mode,
@@ -301,6 +302,7 @@ pub async fn check(
     endpoint_config: &ApiEndpoint,
     key: &str,
     model: &str,
+    proxy: &crate::network::ProxySettings,
 ) -> inspection::ProbeResult {
     match endpoint_config.protocol {
         Protocol::Openai => {
@@ -309,23 +311,39 @@ pub async fn check(
                 key,
                 model,
                 endpoint_config.auth_mode,
+                proxy,
             )
             .await
         }
         Protocol::Anthropic => {
-            inspection::probe_anthropic(&endpoint_config.url, key, model, endpoint_config.auth_mode)
-                .await
+            inspection::probe_anthropic(
+                &endpoint_config.url,
+                key,
+                model,
+                endpoint_config.auth_mode,
+                proxy,
+            )
+            .await
         }
-        Protocol::OpenaiResponses => check_responses(endpoint_config, key, model).await,
-        Protocol::Genai => check_genai(endpoint_config, key, model).await,
+        Protocol::OpenaiResponses => check_responses(endpoint_config, key, model, proxy).await,
+        Protocol::Genai => check_genai(endpoint_config, key, model, proxy).await,
     }
 }
-async fn check_responses(ep: &ApiEndpoint, key: &str, model: &str) -> inspection::ProbeResult {
+async fn check_responses(
+    ep: &ApiEndpoint,
+    key: &str,
+    model: &str,
+    proxy: &crate::network::ProxySettings,
+) -> inspection::ProbeResult {
     let start = Instant::now();
     let Ok(url) = endpoint(&ep.url, "responses") else {
         return result("error", "Responses 地址无效", None, start);
     };
-    let response = inspection::authorize(HTTP.post(url), key, ep.auth_mode, ep.target())
+    let client = match crate::network::client(proxy, "APIConfig/0.2") {
+        Ok(client) => client,
+        Err(error) => return result("error", error, None, start),
+    };
+    let response = inspection::authorize(client.post(url), key, ep.auth_mode, ep.target())
         .json(
             &serde_json::json!({"model":model,"input":"ping","max_output_tokens":1,"store":false}),
         )
@@ -348,7 +366,12 @@ async fn check_responses(ep: &ApiEndpoint, key: &str, model: &str) -> inspection
         Err(_) => result("error", "请求失败，请检查网络和接口地址", None, start),
     }
 }
-async fn check_genai(ep: &ApiEndpoint, key: &str, model: &str) -> inspection::ProbeResult {
+async fn check_genai(
+    ep: &ApiEndpoint,
+    key: &str,
+    model: &str,
+    proxy: &crate::network::ProxySettings,
+) -> inspection::ProbeResult {
     let start = Instant::now();
     let Ok(mut url) = Url::parse(ep.url.trim_end_matches('/')) else {
         return result("error", "GenAI 地址无效", None, start);
@@ -359,7 +382,11 @@ async fn check_genai(ep: &ApiEndpoint, key: &str, model: &str) -> inspection::Pr
         model.trim_start_matches("models/")
     );
     url.set_path(&path);
-    let response = inspection::authorize(HTTP.post(url), key, ep.auth_mode, ep.target())
+    let client = match crate::network::client(proxy, "APIConfig/0.2") {
+        Ok(client) => client,
+        Err(error) => return result("error", error, None, start),
+    };
+    let response = inspection::authorize(client.post(url), key, ep.auth_mode, ep.target())
         .json(&serde_json::json!({"contents":[{"parts":[{"text":"ping"}]}],"generationConfig":{"maxOutputTokens":1}}))
         .send()
         .await;

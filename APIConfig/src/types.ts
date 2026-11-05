@@ -41,6 +41,13 @@ export interface State {
   claude_homes: ClaudeHome[]
   claude_providers: ClaudeProvider[]
   claude_statuses: Record<string, ClaudeStatus>
+  proxy: ProxySettings
+}
+
+export interface ProxySettings {
+  enabled: boolean
+  https_proxy: string
+  https_proxys: string
 }
 
 export type Scene = 'codex' | 'claude'

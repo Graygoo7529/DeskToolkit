@@ -4,6 +4,19 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: testInfo.outputPath(name) })
 }
 
+test('鍦板尯浠ｇ悊鍦ㄥ叏灞€鍙紑鍏冲苟淇濆瓨涓哄叏灞€璁剧疆', async ({ page }) => {
+  await fixture(page)
+  const toggle = page.locator('.proxy-toggle')
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await expect.poll(() => page.evaluate(() => (window as any).__fixture.calls.some((c: any) => c.cmd === 'save_proxy_settings' && c.args.settings.enabled === false))).toBe(true)
+  await page.locator('.proxy-settings').click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('input').nth(1)).toHaveValue('http://127.0.0.1:7897')
+  await expect(dialog.locator('input').nth(2)).toHaveValue('http://127.0.0.1:7897')
+})
+
 async function fixture(page: Page, options: { delay?: number; count?: number } = {}) {
   await page.addInitScript(({ delay, count }) => {
     const inspection = (profile = 'none') => ({ models_path: '', models_auth_mode: 'auto', quota: { profile } })
@@ -14,8 +27,10 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
       claude_homes: [{ name: 'Claude Home', location: 'D:\\Fixtures\\claude' }], claude_providers: [provider('Claude A'), provider('Claude B', 'balance_deepseek')],
       statuses: { Work: { matched_provider: 'Relay', config_exists: true, auth_exists: true, base_url: 'https://relay.example/v1', api_key_masked: 'test…only' } },
       claude_statuses: {}, data_dir: 'D:\\Fixtures\\APIConfig',
+      proxy: { enabled: true, https_proxy: 'http://127.0.0.1:7897', https_proxys: 'http://127.0.0.1:7897' },
     }
     const state = JSON.parse(localStorage.getItem('fixture-state') ?? JSON.stringify(initial))
+    state.proxy ??= initial.proxy
     const profiles = [
       { id: 'none', kind: 'none', label: '未配置', description: '', layout_ids: ['none'], layout_label: '', blocks: [] },
       { id: 'quota_kimi', kind: 'subscription', label: '额度 [Kimi]', description: '使用当前账号地址和 Key', layout_ids: ['weekly', 'hourly'], layout_label: '订阅额度', blocks: [
@@ -44,6 +59,7 @@ async function fixture(page: Page, options: { delay?: number; count?: number } =
         state.data_dir = args.path
         if (args.confirmBackup) { state.providers = [provider('Saved provider')]; state.homes = []; state.statuses = {}; apiAccounts = [account('Saved Kimi', true)] }
       }
+      if (cmd === 'save_proxy_settings') { state.proxy = args.settings; return JSON.parse(JSON.stringify(state)) }
       if (cmd === 'get_api_probe_profiles') return profiles
       if (cmd === 'create_quota_profile') return { id: 'custom_fixture', kind: args.input.kind, label: args.input.label, description: '使用当前账号地址和 Key', layout_ids: ['custom_fixture_layout'], layout_label: args.input.layout_label, blocks: args.input.blocks, editable: true }
       if (cmd === 'get_api_accounts') return apiAccounts

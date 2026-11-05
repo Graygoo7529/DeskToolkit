@@ -3,20 +3,10 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
-use std::sync::LazyLock;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
 static SLOTS: Semaphore = Semaphore::const_new(3);
-static HTTP: LazyLock<Client> = LazyLock::new(|| {
-    Client::builder()
-        .user_agent("APIConfig/0.1")
-        .timeout(Duration::from_secs(12))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("HTTP client")
-});
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Auth {
@@ -190,6 +180,7 @@ struct RequestError {
 }
 
 async fn get_json(
+    client: &Client,
     url: Url,
     key: &str,
     auth: Auth,
@@ -200,7 +191,7 @@ async fn get_json(
     } else {
         AuthTarget::Openai
     };
-    let mut request = authorize(HTTP.get(url), key, auth, target);
+    let mut request = authorize(client.get(url), key, auth, target);
     if anthropic {
         request = request.header("anthropic-version", "2023-06-01");
     }
@@ -251,12 +242,13 @@ async fn get_json(
 }
 
 async fn post_json(
+    client: &Client,
     url: Url,
     key: &str,
     auth: Auth,
     body: Value,
 ) -> Result<(Value, u16), RequestError> {
-    let mut response = authorize(HTTP.post(url), key, auth, AuthTarget::Anthropic)
+    let mut response = authorize(client.post(url), key, auth, AuthTarget::Anthropic)
         .header("anthropic-version", "2023-06-01")
         .json(&body)
         .send()
@@ -306,10 +298,24 @@ async fn post_json(
     Ok((body, status))
 }
 
-pub async fn probe_openai_model(url: &str, key: &str, model: &str, auth: Auth) -> ProbeResult {
+pub async fn probe_openai_model(
+    url: &str,
+    key: &str,
+    model: &str,
+    auth: Auth,
+    proxy: &crate::network::ProxySettings,
+) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
+    let client = match crate::network::client(proxy, "APIConfig/0.1") {
+        Ok(client) => client,
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error;
+            return result;
+        }
+    };
     let endpoint = match endpoint(url, "", "chat/completions") {
         Ok(value) => value,
         Err(error) => {
@@ -323,7 +329,7 @@ pub async fn probe_openai_model(url: &str, key: &str, model: &str, auth: Auth) -
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "ping"}]
     });
-    let response = authorize(HTTP.post(endpoint), key, auth, AuthTarget::Openai)
+    let response = authorize(client.post(endpoint), key, auth, AuthTarget::Openai)
         .json(&body)
         .send()
         .await;
@@ -365,10 +371,24 @@ pub async fn probe_openai_model(url: &str, key: &str, model: &str, auth: Auth) -
 }
 
 /// Anthropic 兼容接口通常没有 GET /models，使用最多 1 个输出 token 做可用性探测。
-pub async fn probe_anthropic(url: &str, key: &str, model: &str, auth: Auth) -> ProbeResult {
+pub async fn probe_anthropic(
+    url: &str,
+    key: &str,
+    model: &str,
+    auth: Auth,
+    proxy: &crate::network::ProxySettings,
+) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
+    let client = match crate::network::client(proxy, "APIConfig/0.1") {
+        Ok(client) => client,
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error;
+            return result;
+        }
+    };
     let endpoint = match endpoint(url, "", "messages") {
         Ok(value) => value,
         Err(error) => {
@@ -382,7 +402,7 @@ pub async fn probe_anthropic(url: &str, key: &str, model: &str, auth: Auth) -> P
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "ping"}]
     });
-    match post_json(endpoint, key, auth, body).await {
+    match post_json(&client, endpoint, key, auth, body).await {
         Ok((_body, status)) => {
             result.http_status = Some(status);
             result.status = "ok".into();
@@ -402,10 +422,19 @@ pub async fn inspect_models(
     provider: crate::data::Provider,
     anthropic: bool,
     connection_only: bool,
+    proxy: &crate::network::ProxySettings,
 ) -> ProbeResult {
     let _slot = SLOTS.acquire().await.expect("inspection semaphore");
     let start = Instant::now();
     let mut result = ProbeResult::new();
+    let client = match crate::network::client(proxy, "APIConfig/0.1") {
+        Ok(client) => client,
+        Err(error) => {
+            result.status = "error".into();
+            result.message = error;
+            return result;
+        }
+    };
     let settings = &provider.inspection;
     let (path, leaf, auth) = (&settings.models_path, "models", settings.models_auth_mode);
     let mut url = match endpoint(&provider.url, path, leaf) {
@@ -420,20 +449,21 @@ pub async fn inspect_models(
     let mut cursors = HashSet::new();
     // Anthropic 用 after_id 分页；其他兼容接口不猜测分页协议。
     for page in 0..5 {
-        let (body, status) = match get_json(url.clone(), &provider.key, auth, anthropic).await {
-            Ok(value) => value,
-            Err(e) => {
-                result.status = if result.models.is_empty() {
-                    "error"
-                } else {
-                    "partial"
+        let (body, status) =
+            match get_json(&client, url.clone(), &provider.key, auth, anthropic).await {
+                Ok(value) => value,
+                Err(e) => {
+                    result.status = if result.models.is_empty() {
+                        "error"
+                    } else {
+                        "partial"
+                    }
+                    .into();
+                    result.message = e.message;
+                    result.http_status = e.status;
+                    break;
                 }
-                .into();
-                result.message = e.message;
-                result.http_status = e.status;
-                break;
-            }
-        };
+            };
         result.http_status = Some(status);
         match parse_models(&body) {
             Ok((models, partial)) => {
@@ -509,6 +539,7 @@ pub async fn inspect_models(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn urls_preserve_prefix_and_reject_cross_origin_credentials() {
@@ -599,7 +630,8 @@ mod tests {
     #[tokio::test]
     async fn http_connection_uses_get_and_correct_auth_without_generation() {
         let (url, server) = mock_server(vec![(200, r#"{"data":[]}"#.into(), String::new())]);
-        let result = inspect_models(provider(url), false, true).await;
+        let proxy = crate::network::ProxySettings::disabled();
+        let result = inspect_models(provider(url), false, true, &proxy).await;
         assert_eq!(result.status, "ok");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /v1/models "));
@@ -620,7 +652,8 @@ mod tests {
         ]);
         let mut p = provider(url);
         p.inspection.models_auth_mode = Auth::Auto;
-        let result = inspect_models(p, true, false).await;
+        let proxy = crate::network::ProxySettings::disabled();
+        let result = inspect_models(p, true, false, &proxy).await;
         assert_eq!(result.status, "partial");
         assert_eq!(result.models[0].id, "model-1");
         assert!(!result.message.contains("fixture-token"));
@@ -645,7 +678,8 @@ mod tests {
                 r#"{"error":"fixture-token"}"#.into(),
                 headers,
             )]);
-            let result = inspect_models(provider(url), false, true).await;
+            let proxy = crate::network::ProxySettings::disabled();
+            let result = inspect_models(provider(url), false, true, &proxy).await;
             assert_eq!(result.status, "error");
             assert_eq!(result.http_status, Some(status));
             assert!(!result.message.contains("fixture-token"));

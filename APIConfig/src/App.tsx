@@ -4,6 +4,7 @@ import * as api from './api'
 import ScenePanel from './components/ScenePanel'
 import Icon from './components/Icon'
 import StorageModal from './components/StorageModal'
+import ProxyModal from './components/ProxyModal'
 import Toasts, { type Toast } from './components/Toasts'
 import ApiPanel from './components/ApiPanel'
 
@@ -16,6 +17,8 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [activePage, setActivePage] = useState<'codex' | 'claude' | 'api'>('codex')
   const [storageOpen, setStorageOpen] = useState(false)
+  const [proxyOpen, setProxyOpen] = useState(false)
+  const [proxyBusy, setProxyBusy] = useState(false)
   const [storageRevision, setStorageRevision] = useState(0)
   const pushToast = useCallback((kind: Toast['kind'], text: string) => {
     const id = ++toastSeq
@@ -27,6 +30,19 @@ export default function App() {
     catch (e) { setLoadError(String(e)) }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
+  const toggleProxy = async () => {
+    if (!state || proxyBusy) return
+    setProxyBusy(true)
+    try {
+      const enabled = !state.proxy.enabled
+      setState(await api.saveProxySettings({ ...state.proxy, enabled }))
+      pushToast('success', enabled ? '地区代理已开启' : '地区代理已关闭')
+    } catch (e) {
+      pushToast('error', String(e))
+    } finally {
+      setProxyBusy(false)
+    }
+  }
   const storageModal = storageOpen && <StorageModal current={state?.data_dir} onClose={() => setStorageOpen(false)} onChange={(next) => { setState(next); setLoadError(null); setStorageRevision((v) => v + 1); pushToast('success', '已切换数据目录') }} />
   if (loadError) return <div className="app app-center"><div className="fatal"><h2>加载失败</h2><p>{loadError}</p><button className="btn btn-primary" onClick={refresh}>重试</button><button className="btn btn-ghost" onClick={() => setStorageOpen(true)}>选择数据目录</button></div>{storageModal}</div>
   if (!state) return <div className="app app-center"><div className="loading">正在准备配置…</div></div>
@@ -43,6 +59,12 @@ export default function App() {
             setActivePage(next.id); document.getElementById(`tab-${next.id}`)?.focus()
           }}><span className={`tab-mark ${page.id}`} aria-hidden="true">{page.mark}</span>{page.title}</button>)}
       </nav>
+      <div className="proxy-control">
+        <button className={`proxy-toggle${state.proxy.enabled ? ' active' : ''}`} role="switch" aria-checked={state.proxy.enabled} disabled={proxyBusy} onClick={() => void toggleProxy()}>
+          <span className="proxy-dot" />地区代理 {state.proxy.enabled ? '已开启' : '已关闭'}
+        </button>
+        <button className="icon-btn proxy-settings" aria-label="地区代理设置" title="地区代理设置" onClick={() => setProxyOpen(true)}><Icon name="more" size={16} /></button>
+      </div>
       <button className="data-button icon-btn" aria-label="数据目录设置" title={state.data_dir} onClick={() => setStorageOpen(true)}><Icon name="folder" /><span>数据目录</span></button>
     </header>
     <main className="page-content" key={storageRevision}>
@@ -53,5 +75,6 @@ export default function App() {
     </main>
     <Toasts toasts={toasts} />
     {storageModal}
+    {proxyOpen && <ProxyModal current={state.proxy} onClose={() => setProxyOpen(false)} onChange={(next) => { setState(next); pushToast('success', '地区代理设置已保存') }} />}
   </div>
 }
