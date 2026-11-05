@@ -181,11 +181,10 @@ pub fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Load the application-level proxy setting. It intentionally lives beside
-/// `storage.json`, rather than inside the selected data directory, so changing
-/// the data directory does not silently change how the three panels connect.
+/// Load the proxy setting from the currently selected data directory. Each
+/// data directory therefore carries its own environment-level network setup.
 pub fn load_proxy_settings(app: &AppHandle) -> Result<ProxySettings, String> {
-    let path = default_dir(app)?.join(PROXY_FILE);
+    let path = resolve_dir(&default_dir(app)?)?.join(PROXY_FILE);
     if !path.exists() {
         return Ok(ProxySettings::default());
     }
@@ -195,8 +194,8 @@ pub fn load_proxy_settings(app: &AppHandle) -> Result<ProxySettings, String> {
 
 pub fn save_proxy_settings(app: &AppHandle, settings: &ProxySettings) -> Result<(), String> {
     settings.validate()?;
-    let dir = default_dir(app)?;
-    fs::create_dir_all(&dir).map_err(|_| "无法创建应用配置目录".to_string())?;
+    let dir = resolve_dir(&default_dir(app)?)?;
+    fs::create_dir_all(&dir).map_err(|_| "无法创建数据目录".to_string())?;
     let text =
         serde_json::to_string_pretty(settings).map_err(|_| "无法生成代理设置".to_string())?;
     atomic_write(&dir.join(PROXY_FILE), &text)
