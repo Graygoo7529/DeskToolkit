@@ -1,7 +1,7 @@
 {
   "name": "deskauth",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner",
@@ -10,6 +10,7 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "jsqr": "^1.4.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.0.0",

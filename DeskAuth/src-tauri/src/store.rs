@@ -24,6 +24,8 @@ fn decode(bytes: &[u8]) -> Result<Vault, String> {
     let mut vault: Vault = serde_json::from_slice(bytes)
         .map_err(|_| "数据文件格式错误；原文件已保留，请检查文件或使用备份")?;
     vault.validate()?;
+    // Read legacy files without rewriting them. The next explicit save/export is v2.
+    vault.version = 2;
     Ok(vault)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8], replace: bool) -> Result<(), String> {
@@ -178,6 +180,7 @@ impl Store {
             alias: input.alias,
             username: input.username,
             password,
+            totp: old.and_then(|a| a.totp.clone()),
             phones: input.phones,
             emails: input.emails,
             group: input.group,
@@ -221,6 +224,47 @@ impl Store {
             .find(|a| a.id == id)
             .ok_or("账户不存在")?;
         a.favorite = value;
+        a.updated_at = model::now_ms()?;
+        self.commit(next)
+    }
+    pub fn configure_totp(
+        &mut self,
+        id: &str,
+        input: crate::model::TotpInput,
+    ) -> Result<(), String> {
+        let old = self.account(id)?;
+        let secret = match input.secret {
+            Some(value) if !value.trim().is_empty() => value,
+            _ => old
+                .totp
+                .as_ref()
+                .map(|t| t.secret.clone())
+                .ok_or("请填写认证器共享密钥")?,
+        };
+        let mut next = self.vault.clone();
+        let a = next
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or("账户不存在")?;
+        a.totp = Some(crate::model::Totp {
+            secret,
+            algorithm: input.algorithm,
+            digits: input.digits,
+            period: input.period,
+        });
+        a.updated_at = model::now_ms()?;
+        self.commit(next)
+    }
+    pub fn remove_totp(&mut self, id: &str) -> Result<(), String> {
+        self.account(id)?;
+        let mut next = self.vault.clone();
+        let a = next
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or("账户不存在")?;
+        a.totp = None;
         a.updated_at = model::now_ms()?;
         self.commit(next)
     }
@@ -325,6 +369,101 @@ mod tests {
         let mut s = Store::new(root.join("config/storage.json"));
         s.open(&root.join("data")).unwrap();
         s
+    }
+    fn totp_input(secret: Option<&str>) -> crate::model::TotpInput {
+        crate::model::TotpInput {
+            secret: secret.map(str::to_owned),
+            algorithm: crate::otp::Algorithm::SHA1,
+            digits: 6,
+            period: 30,
+        }
+    }
+    #[test]
+    fn v1_upgrade_preserves_raw_file_until_save_and_keeps_totp_during_account_edits() {
+        let root = tempfile::tempdir().unwrap();
+        let mut s = setup(root.path());
+        let id = s.save(input()).unwrap();
+        let path = root.path().join("data/accounts.json");
+        let mut old = serde_json::to_value(&s.vault).unwrap();
+        old["version"] = 1.into();
+        old["accounts"][0].as_object_mut().unwrap().remove("totp");
+        let old_raw = serde_json::to_vec_pretty(&old).unwrap();
+        drop(s);
+        fs::write(&path, &old_raw).unwrap();
+        let mut s = Store::new(root.path().join("config/storage.json"));
+        assert!(s.startup_error.is_none());
+        assert_eq!(s.vault.version, 2);
+        assert_eq!(fs::read(&path).unwrap(), old_raw);
+        s.configure_totp(&id, totp_input(Some("JBSWY3DPEHPK3PXP")))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap()
+                ["version"],
+            2
+        );
+        assert_eq!(
+            fs::read(root.path().join("data/accounts.previous.json")).unwrap(),
+            old_raw
+        );
+        let before = s.raw.clone();
+        let mut invalid = totp_input(Some("invalid!"));
+        invalid.period = 0;
+        assert!(s.configure_totp(&id, invalid).is_err());
+        assert_eq!(s.raw, before);
+        let mut edit = input();
+        edit.id = Some(id.clone());
+        edit.password = None;
+        edit.alias = "updated".into();
+        s.save(edit).unwrap();
+        assert_eq!(
+            s.account(&id).unwrap().totp.as_ref().unwrap().secret,
+            "JBSWY3DPEHPK3PXP"
+        );
+        let mut params = totp_input(None);
+        params.digits = 8;
+        params.period = 60;
+        s.configure_totp(&id, params).unwrap();
+        let summary =
+            serde_json::to_string(&AccountSummary::from(s.account(&id).unwrap())).unwrap();
+        assert!(!summary.contains("JBSWY"));
+        assert!(!summary.contains("p@ss"));
+        assert!(summary.contains("60"));
+        s.remove_totp(&id).unwrap();
+        let a = s.account(&id).unwrap();
+        assert!(a.totp.is_none());
+        assert_eq!(a.password, "  p@ss 中文  ");
+        assert_eq!(a.phones.len(), 1);
+        assert_eq!(a.emails.len(), 1);
+        assert_eq!(a.alias, "updated");
+    }
+    #[test]
+    fn totp_round_trips_in_backups_without_overwriting_existing_configuration() {
+        let root = tempfile::tempdir().unwrap();
+        let mut s = setup(root.path());
+        let id = s.save(input()).unwrap();
+        s.configure_totp(&id, totp_input(Some("JBSWY3DPEHPK3PXP")))
+            .unwrap();
+        let backup = root.path().join("backup.json");
+        s.export(&backup).unwrap();
+        let mut target = Store::new(root.path().join("target-config/storage.json"));
+        target.open(&root.path().join("target")).unwrap();
+        assert_eq!(target.import(&backup).unwrap(), (1, 0));
+        assert_eq!(
+            target.account(&id).unwrap().totp.as_ref().unwrap().secret,
+            "JBSWY3DPEHPK3PXP"
+        );
+        target
+            .configure_totp(&id, totp_input(Some("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")))
+            .unwrap();
+        assert_eq!(target.import(&backup).unwrap(), (0, 1));
+        assert_eq!(
+            target.account(&id).unwrap().totp.as_ref().unwrap().secret,
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        );
+        target.remove_totp(&id).unwrap();
+        drop(target);
+        let target = Store::new(root.path().join("target-config/storage.json"));
+        assert!(target.account(&id).unwrap().totp.is_none());
     }
     #[test]
     fn persistence_password_preservation_and_explicit_clear() {

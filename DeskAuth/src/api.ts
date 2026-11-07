@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
-import type { AccountInput, AppState } from './types'
+import type { AccountInput, AppState, TotpInput, ParsedTotp, OtpCode, TimeStatus, TwoFAuthPreview } from './types'
 
 export const api = {
   state: () => invoke<AppState>('get_state'),
@@ -16,4 +16,14 @@ export const api = {
   copy: (text: string) => writeText(text),
   import: (path: string) => invoke<{ state: AppState; added: number; skipped: number }>('import_backup', { path }),
   export: (path: string) => invoke<void>('export_backup', { path }),
+  configureTotp: (id: string, input: TotpInput) => invoke<AppState>('configure_totp', { id, input }),
+  removeTotp: (id: string) => invoke<AppState>('remove_totp', { id }),
+  totpSecret: (id: string) => invoke<string>('reveal_totp_secret', { id }),
+  parse: (uri: string) => invoke<ParsedTotp>('parse_uri', { uri }),
+  code: (id: string) => invoke<OtpCode>('get_code', { id }),
+  timeStatus: () => invoke<TimeStatus>('get_time_status'),
+  onlineTime: (enabled: boolean) => invoke<TimeStatus>('set_online_time', { enabled }),
+  syncTime: () => invoke<TimeStatus>('sync_time'),
+  previewTwoFAuth: (path: string) => invoke<TwoFAuthPreview>('preview_twofauth', { path }),
+  selectTwoFAuth: (path: string, fingerprint: string, id: string) => invoke<ParsedTotp>('select_twofauth', { path, fingerprint, id }),
 }

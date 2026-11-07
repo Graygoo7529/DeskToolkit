@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { api } from '../api'
-import { purposes, type Account, type AppState, type ContactKind, type ContactLookup, type Notify } from '../types'
+import { purposes, type Account, type AppState, type ContactKind, type ContactLookup, type Notify, type TimeStatus } from '../types'
 import Icon from './Icon'
 import Modal from './Modal'
+import TotpCard from './TotpCard'
 
 const timestamp = (value: number | null) => value === null ? '暂无' : new Date(value).toLocaleString('zh-CN', { hour12: false })
 
-export default function AccountDetail({ account, onChange, onEdit, onLookup, notify }: { account: Account; onChange: (state: AppState) => void; onEdit: () => void; onLookup: (lookup: ContactLookup) => void; notify: Notify }) {
+export default function AccountDetail({ account, onChange, onEdit, onLookup, onConfigureTotp, timeStatus, onTimeStatus, notify }: { account: Account; onChange: (state: AppState) => void; onEdit: () => void; onLookup: (lookup: ContactLookup) => void; onConfigureTotp: () => void; timeStatus: TimeStatus | null; onTimeStatus: (status: TimeStatus) => void; notify: Notify }) {
   const [password, setPassword] = useState<string | null>(null); const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false); const [deleting, setDeleting] = useState(false); const [error, setError] = useState('')
   const alive = useRef(true); const version = useRef(0); const copiedTimer = useRef<number>()
@@ -44,6 +45,7 @@ export default function AccountDetail({ account, onChange, onEdit, onLookup, not
         <div className="credential-row password-row"><div className="credential-label">密码</div><span data-testid="password-value" className={`credential-value password-value mono selectable ${password === null ? 'masked' : ''}`}>{account.hasPassword ? password ?? '••••••••••••' : '尚未记录'}</span><button className="icon-btn" disabled={busy || !account.hasPassword} aria-label={password === null ? '显示密码' : '隐藏密码'} onClick={togglePassword}><Icon name={password === null ? 'eye' : 'hide'} size={16} /></button></div>
         <div className="credential-actions"><span><i className="status-dot" />{account.hasPassword ? '本机保存 · 随时取用' : '可在编辑中补充密码'}</span><button className={`btn ${copied ? 'copied' : 'primary'}`} disabled={busy || !account.hasPassword} onClick={copyPassword}><Icon name={copied ? 'check' : 'copy'} size={15} />{copied ? '已复制' : '复制密码'}</button></div>
       </section>
+      <TotpCard id={account.id} config={account.totp ?? null} timeStatus={timeStatus} onTimeStatus={onTimeStatus} onConfigure={onConfigureTotp} notify={notify} />
       {account.website && <div className="website-line"><Icon name="link" size={13} /><span className="selectable">{account.website}</span></div>}
       {account.tags.length > 0 && <div className="account-tags">{account.tags.map(t => <span className="tag" key={t}># {t}</span>)}</div>}
       <div className="contacts-grid">{contacts('phones')}{contacts('emails')}</div>

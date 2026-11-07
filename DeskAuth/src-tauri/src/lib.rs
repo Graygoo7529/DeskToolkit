@@ -1,11 +1,14 @@
+mod legacy;
 mod model;
+mod otp;
 mod store;
+mod time_sync;
 
 use model::{AccountInput, AccountSummary};
 use serde::Serialize;
 use std::{
     path::Path,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 use tauri::{Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -130,6 +133,96 @@ fn export_backup(state: State<Shared>, path: String) -> Result<(), String> {
     lock(&state)?.export(Path::new(&path))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Code {
+    code: String,
+    period: u64,
+    valid_until: u64,
+    generated_at: u64,
+    time_status: time_sync::TimeStatus,
+}
+#[tauri::command]
+fn get_code(
+    state: State<Shared>,
+    clock: State<Arc<time_sync::TimeService>>,
+    id: String,
+) -> Result<Code, String> {
+    let s = lock(&state)?;
+    let t = s
+        .account(&id)?
+        .totp
+        .as_ref()
+        .ok_or("此账户尚未配置认证器")?;
+    let (now, time_status) = clock.now()?;
+    Ok(Code {
+        code: otp::generate(&t.secret, t.algorithm, t.digits, t.period, now / 1000)?,
+        period: t.period,
+        generated_at: now,
+        valid_until: (now / 1000 / t.period + 1) * t.period * 1000,
+        time_status,
+    })
+}
+#[tauri::command]
+fn configure_totp(
+    state: State<Shared>,
+    id: String,
+    input: model::TotpInput,
+) -> Result<AppState, String> {
+    let mut s = lock(&state)?;
+    s.configure_totp(&id, input)?;
+    Ok(snapshot(&s))
+}
+#[tauri::command]
+fn remove_totp(state: State<Shared>, id: String) -> Result<AppState, String> {
+    let mut s = lock(&state)?;
+    s.remove_totp(&id)?;
+    Ok(snapshot(&s))
+}
+#[tauri::command]
+fn reveal_totp_secret(state: State<Shared>, id: String) -> Result<String, String> {
+    Ok(lock(&state)?
+        .account(&id)?
+        .totp
+        .as_ref()
+        .ok_or("此账户尚未配置认证器")?
+        .secret
+        .clone())
+}
+#[tauri::command]
+fn parse_uri(uri: String) -> Result<otp::ParsedUri, String> {
+    otp::parse_uri(&uri)
+}
+#[tauri::command]
+fn preview_twofauth(path: String) -> Result<legacy::Preview, String> {
+    legacy::preview(Path::new(&path))
+}
+#[tauri::command]
+fn select_twofauth(
+    path: String,
+    fingerprint: String,
+    id: String,
+) -> Result<otp::ParsedUri, String> {
+    legacy::select(Path::new(&path), &fingerprint, &id)
+}
+#[tauri::command]
+fn get_time_status(
+    clock: State<Arc<time_sync::TimeService>>,
+) -> Result<time_sync::TimeStatus, String> {
+    clock.status()
+}
+#[tauri::command]
+fn set_online_time(
+    clock: State<Arc<time_sync::TimeService>>,
+    enabled: bool,
+) -> Result<time_sync::TimeStatus, String> {
+    clock.set_enabled(enabled)
+}
+#[tauri::command]
+fn sync_time(clock: State<Arc<time_sync::TimeService>>) -> Result<time_sync::TimeStatus, String> {
+    clock.request_sync()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -137,6 +230,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            let clock = Arc::new(time_sync::TimeService::new(
+                app.path().app_config_dir()?.join("time-settings.json"),
+            ));
+            app.manage(clock.clone());
+            tauri::async_runtime::spawn(clock.run());
             app.manage(Mutex::new(store::Store::new(
                 app.path().app_config_dir()?.join("storage.json"),
             )));
@@ -154,7 +252,17 @@ pub fn run() {
             copy_password,
             open_website,
             import_backup,
-            export_backup
+            export_backup,
+            get_code,
+            configure_totp,
+            remove_totp,
+            reveal_totp_secret,
+            parse_uri,
+            preview_twofauth,
+            select_twofauth,
+            get_time_status,
+            set_online_time,
+            sync_time
         ])
         .run(tauri::generate_context!())
         .expect("无法启动 DeskAuth");

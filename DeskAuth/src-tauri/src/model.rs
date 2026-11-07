@@ -1,7 +1,40 @@
+use crate::otp::{self, Algorithm};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Totp {
+    pub secret: String,
+    pub algorithm: Algorithm,
+    pub digits: u32,
+    pub period: u64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TotpInput {
+    pub secret: Option<String>,
+    pub algorithm: Algorithm,
+    pub digits: u32,
+    pub period: u64,
+}
+#[derive(Serialize)]
+pub struct TotpSummary {
+    pub algorithm: Algorithm,
+    pub digits: u32,
+    pub period: u64,
+}
+impl From<&Totp> for TotpSummary {
+    fn from(t: &Totp) -> Self {
+        Self {
+            algorithm: t.algorithm,
+            digits: t.digits,
+            period: t.period,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,6 +65,8 @@ pub struct Account {
     pub alias: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub totp: Option<Totp>,
     pub phones: Vec<Contact>,
     pub emails: Vec<Contact>,
     pub group: String,
@@ -71,6 +106,7 @@ pub struct AccountSummary {
     pub alias: String,
     pub username: String,
     pub has_password: bool,
+    pub totp: Option<TotpSummary>,
     pub phones: Vec<Contact>,
     pub emails: Vec<Contact>,
     pub group: String,
@@ -91,6 +127,7 @@ impl From<&Account> for AccountSummary {
             alias: a.alias.clone(),
             username: a.username.clone(),
             has_password: !a.password.is_empty(),
+            totp: a.totp.as_ref().map(TotpSummary::from),
             phones: a.phones.clone(),
             emails: a.emails.clone(),
             group: a.group.clone(),
@@ -116,21 +153,24 @@ impl Default for Vault {
     fn default() -> Self {
         Self {
             format: "DeskAuth".into(),
-            version: 1,
+            version: 2,
             accounts: vec![],
         }
     }
 }
 impl Vault {
     pub fn validate(&mut self) -> Result<(), String> {
-        if self.format != "DeskAuth" || self.version != 1 {
-            return Err("不支持的数据格式或版本，需要 DeskAuth v1 备份".into());
+        if self.format != "DeskAuth" || ![1, 2].contains(&self.version) {
+            return Err("不支持的数据格式或版本，需要 DeskAuth v1 / v2 备份".into());
         }
         if self.accounts.len() > 5000 {
             return Err("最多支持 5000 个账户".into());
         }
         let mut ids = HashSet::new();
         for a in &mut self.accounts {
+            if self.version == 1 && a.totp.is_some() {
+                return Err("v1 账户库不应包含认证器数据，请核对文件版本".into());
+            }
             validate_account(a)?;
             if !ids.insert(a.id.clone()) {
                 return Err("数据包含重复账户 ID".into());
@@ -267,6 +307,10 @@ pub fn validate_account(a: &mut Account) -> Result<(), String> {
     }
     validate_contacts(&mut a.phones, true)?;
     validate_contacts(&mut a.emails, false)?;
+    if let Some(t) = &mut a.totp {
+        t.secret = otp::normalize_secret(&t.secret)?;
+        otp::validate_params(t.digits, t.period)?;
+    }
     Ok(())
 }
 pub fn same_identity(a: &Account, b: &Account) -> bool {

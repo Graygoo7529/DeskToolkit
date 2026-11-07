@@ -3,19 +3,56 @@ import { test, expect, type Page } from '@playwright/test'
 async function fixture(page: Page, setup = false) {
   await page.addInitScript(({ setup }) => {
     const contact = (value: string, label = '个人', primary = true) => ({ id: crypto.randomUUID(), value, label, primary, purposes: ['login', 'recovery'], notes: '' })
-    const account = (id: string, platform: string, username: string, group: string, color: string, favorite = false) => ({ id, platform, username, group, color, favorite, website: `https://${platform.toLowerCase()}.com`, alias: group === '工作' ? '工作账户' : '个人账户', hasPassword: true, phones: [contact('+86 138-0000-0000')], emails: [contact('alice@example.com')], tags: ['常用'], notes: '演示账户资料，仅用于测试。', createdAt: 1780272000000, updatedAt: 1780272000000, passwordUpdatedAt: 1780272000000 })
+    const account = (id: string, platform: string, username: string, group: string, color: string, favorite = false) => ({ id, platform, username, group, color, favorite, website: `https://${platform.toLowerCase()}.com`, alias: group === '工作' ? '工作账户' : '个人账户', hasPassword: true, totp: null as { algorithm: string; digits: number; period: number } | null, phones: [contact('+86 138-0000-0000')], emails: [contact('alice@example.com')], tags: ['常用'], notes: '演示账户资料，仅用于测试。', createdAt: 1780272000000, updatedAt: 1780272000000, passwordUpdatedAt: 1780272000000 })
     const examples = [account('alice', 'GitHub', 'alice', '个人', '#A7B8EF', true), account('work', 'GitHub', 'alice-work', '工作', '#86CDB7'), account('google', 'Google', 'alice@example.com', '个人', '#DDB18D'), account('microsoft', 'Microsoft', 'alice-office', '工作', '#86C6DC')]
     examples[0].emails.push(contact('work@example.com', '工作', false))
     examples[1].phones = [contact('155 0000 0000', '工作')]
     examples[1].emails = [contact('work@example.com', '工作')]
     examples[2].hasPassword = false
+    examples[0].totp = { algorithm: 'SHA1', digits: 6, period: 30 }
     const state = { dataDir: setup ? null : 'B:\\Fixtures\\DeskAuth' as string | null, startupError: null, accounts: setup ? [] : examples }
     const controls = { calls: [] as { cmd: string; args: any }[], clipboard: '', passwords: { alice: 'Demo! Password 中文  ', work: 'Work-demo-password', google: '', microsoft: 'Office-demo' } as Record<string, string>, failSave: false, failCopy: false, failDirectory: false, failImport: false, failDelete: false, delayPassword: 0, folder: 'B:\\Fixtures\\New', importFile: 'B:\\Fixtures\\backup.json', state }
+    const time = { enabled: false, syncing: false, source: 'local', offsetMs: 0, uncertaintyMs: null as number | null, lastSuccessAt: null as number | null, validUntil: null as number | null, providers: [] as string[], error: null as string | null, revision: 0 }
+    const auth = { time, totpSecrets: { alice: 'JBSWY3DPEHPK3PXP' } as Record<string, string>, nextCode: '123456', failCode: false, failTotp: false, failTime: false, failLegacy: false, timeOffset: 90000, timeDelay: 60, codeDelay: 0 }
+    const startSync = () => {
+      time.syncing = true; time.revision++; const revision = time.revision
+      window.setTimeout(() => {
+        if (!time.enabled || time.revision !== revision) return
+        time.syncing = false; time.revision++
+        if (auth.failTime) time.error = '时间来源请求超时'
+        else Object.assign(time, { source: 'network', offsetMs: auth.timeOffset, uncertaintyMs: 700, lastSuccessAt: Date.now(), validUntil: Date.now() + 3600000, providers: ['Cloudflare', 'Microsoft'], error: null })
+      }, auth.timeDelay)
+    }
+    Object.assign(controls, auth)
     ;(window as any).__fixture = controls
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (cmd: string, args: any = {}) => {
       controls.calls.push({ cmd, args: structuredClone(args) })
       const clone = () => structuredClone(state)
       if (cmd === 'get_state') return clone()
+      const settings = controls as typeof controls & typeof auth
+      if (cmd === 'get_time_status') return structuredClone(time)
+      if (cmd === 'set_online_time') { Object.assign(time, { enabled: args.enabled, syncing: false, source: 'local', offsetMs: 0, uncertaintyMs: null, lastSuccessAt: null, validUntil: null, providers: [], error: null, revision: time.revision + 1 }); if (args.enabled) { auth.failTime = settings.failTime; auth.timeOffset = settings.timeOffset; auth.timeDelay = settings.timeDelay; startSync() } return structuredClone(time) }
+      if (cmd === 'sync_time') { if (!time.enabled) throw '请先开启联网校时'; if (!time.syncing) { auth.failTime = settings.failTime; auth.timeOffset = settings.timeOffset; auth.timeDelay = settings.timeDelay; startSync() } return structuredClone(time) }
+      if (cmd === 'get_code') {
+        if (settings.failCode) throw '读取认证器失败'
+        const t = state.accounts.find(a => a.id === args.id)?.totp
+        if (!t) throw '此账户尚未配置认证器'
+        const now = Date.now() + time.offsetMs; const code = settings.nextCode.padStart(t.digits, '0')
+        if (settings.codeDelay) await new Promise(resolve => setTimeout(resolve, settings.codeDelay))
+        return { code, period: t.period, generatedAt: now, validUntil: (Math.floor(now / (t.period * 1000)) + 1) * t.period * 1000, timeStatus: structuredClone(time) }
+      }
+      if (cmd === 'configure_totp') {
+        if (settings.failTotp) throw '认证器密钥无效，原配置已保留'
+        const a = state.accounts.find(a => a.id === args.id)!
+        if (args.input.secret) settings.totpSecrets[args.id] = args.input.secret
+        a.totp = { algorithm: args.input.algorithm, digits: args.input.digits, period: args.input.period }; a.updatedAt = Date.now()
+        return clone()
+      }
+      if (cmd === 'remove_totp') { const a = state.accounts.find(a => a.id === args.id)!; a.totp = null; a.updatedAt = Date.now(); return clone() }
+      if (cmd === 'reveal_totp_secret') return settings.totpSecrets[args.id]
+      if (cmd === 'parse_uri') { const uri = new URL(args.uri); if (uri.protocol !== 'otpauth:' || uri.host !== 'totp') throw '仅支持 TOTP 链接'; return { issuer: uri.searchParams.get('issuer') || 'GitHub', account: 'imported@example.com', secret: uri.searchParams.get('secret'), algorithm: uri.searchParams.get('algorithm') || 'SHA1', digits: Number(uri.searchParams.get('digits') || 6), period: Number(uri.searchParams.get('period') || 30) } }
+      if (cmd === 'preview_twofauth') return { fingerprint: 'fixture-fingerprint', entries: [{ id: 'legacy', issuer: 'GitHub', account: 'legacy@example.com', algorithm: 'SHA256', digits: 8, period: 60 }] }
+      if (cmd === 'select_twofauth') { if (settings.failLegacy) throw '备份文件已变化，请重新选择文件'; return { issuer: 'GitHub', account: 'legacy@example.com', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 60 } }
       if (cmd === 'suggest_data_dir') return 'B:\\Fixtures\\DeskAuth'
       if (cmd === 'plugin:dialog|open') return args.options?.directory ? controls.folder : controls.importFile
       if (cmd === 'plugin:dialog|save') return 'B:\\Fixtures\\export.json'
@@ -235,4 +272,150 @@ test('界面尺寸、弹窗焦点与可滚动的多项编辑', async ({ page }, 
   await page.screenshot({ animations: 'disabled', path: info.outputPath('minimum-window.png') })
   await page.getByRole('button', { name: '关联查询', exact: true }).click()
   await expect(dialog.getByRole('button', { name: '关闭', exact: true })).toBeVisible()
+})
+
+test('认证器配置、复制、普通编辑保留、参数修改与移除', async ({ page }, info) => {
+  await fixture(page)
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toHaveText('123 456')
+  await page.evaluate(() => { (window as any).__fixture.nextCode = '654321' })
+  await page.getByRole('button', { name: '复制验证码', exact: true }).click()
+  expect(await clipboard(page)).toBe('654321')
+  await page.getByRole('button', { name: '选择 GitHub alice-work 工作账户', exact: true }).click()
+  await page.getByRole('button', { name: '配置认证器', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('认证器共享密钥', { exact: true }).fill('JBSWY3DPEHPK3PXP')
+  await page.evaluate(() => { (window as any).__fixture.failTotp = true })
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('原配置已保留')
+  await page.evaluate(() => { (window as any).__fixture.failTotp = false })
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toHaveText('654 321')
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await dialog.getByRole('button', { name: '保存账户', exact: true }).click()
+  await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  await expect(dialog.getByLabel('认证器共享密钥', { exact: true })).toHaveValue('')
+  await dialog.getByRole('button', { name: '查看已保存密钥', exact: true }).click()
+  await expect(dialog.getByText('JBSWY3DPEHPK3PXP', { exact: true })).toBeVisible()
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await expect(dialog.getByText('JBSWY3DPEHPK3PXP', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('combobox', { name: '算法', exact: true }).selectOption('SHA512')
+  await dialog.getByRole('combobox', { name: '验证码位数', exact: true }).selectOption('8')
+  await dialog.getByLabel('时间周期（秒）', { exact: true }).fill('60')
+  await page.screenshot({ animations: 'disabled', path: info.outputPath('totp-settings.png') })
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  expect((await calls(page, 'configure_totp')).at(-1).args.input.secret).toBeNull()
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toHaveText('0065 4321')
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  await dialog.getByRole('button', { name: '移除认证器', exact: true }).click()
+  await expect(dialog).toContainText('账户密码和联系方式会保留')
+  await dialog.getByRole('button', { name: '确认移除认证器', exact: true }).click()
+  await expect(page.getByRole('button', { name: '配置认证器', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '复制密码', exact: true }).click()
+  expect(await clipboard(page)).toBe('Work-demo-password')
+  await expect(page.getByText('155 0000 0000', { exact: true })).toBeVisible()
+})
+
+test('认证链接与真实二维码图片导入后核对参数，不改动账户身份', async ({ page }) => {
+  await fixture(page)
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: '链接 / 二维码', exact: true }).click()
+  await dialog.getByRole('textbox', { name: '认证链接', exact: true }).fill('otpauth://hotp/Test?secret=JBSWY3DPEHPK3PXP')
+  await dialog.getByRole('button', { name: '解析认证链接', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('仅支持 TOTP')
+  await dialog.getByRole('textbox', { name: '认证链接', exact: true }).fill('otpauth://totp/Other:other?issuer=Other&secret=JBSWY3DPEHPK3PXP&algorithm=SHA256&digits=8&period=60')
+  await dialog.getByRole('button', { name: '解析认证链接', exact: true }).click()
+  await expect(dialog).toContainText('已读取 Other')
+  await expect(dialog).toContainText('GitHub · alice')
+  await expect(dialog.getByRole('combobox', { name: '算法', exact: true })).toHaveValue('SHA256')
+  await expect(dialog.getByRole('combobox', { name: '验证码位数', exact: true })).toHaveValue('8')
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  await expect(page.getByRole('button', { name: '选择 GitHub alice 个人账户', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  await dialog.getByRole('button', { name: '链接 / 二维码', exact: true }).click()
+  await dialog.getByLabel('二维码图片', { exact: true }).setInputFiles('tests/fixtures/totp.png')
+  await expect(dialog).toContainText('已读取')
+  expect((await calls(page, 'parse_uri')).at(-1).args.uri).toContain('otpauth://totp/')
+  await expect(dialog.getByLabel('认证器共享密钥', { exact: true })).toHaveValue('JBSWY3DPEHPK3PXP')
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeEnabled()
+})
+
+test('2FAuth 备份仅导入选中认证条目，文件变化时阻止采用', async ({ page }) => {
+  await fixture(page)
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: '2FAuth 备份', exact: true }).click()
+  await dialog.getByRole('button', { name: '选择 2FAuth 备份', exact: true }).click()
+  await expect(dialog.getByRole('combobox', { name: '选择认证条目', exact: true })).toContainText('legacy@example.com')
+  await page.evaluate(() => { (window as any).__fixture.failLegacy = true })
+  await dialog.getByRole('button', { name: '采用选中认证信息', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('备份文件已变化')
+  expect(await calls(page, 'configure_totp')).toHaveLength(0)
+  await page.evaluate(() => { (window as any).__fixture.failLegacy = false })
+  await dialog.getByRole('button', { name: '采用选中认证信息', exact: true }).click()
+  await expect(dialog).toContainText('legacy@example.com')
+  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
+  expect((await calls(page, 'configure_totp')).at(-1).args.input).toEqual({ secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 60 })
+  expect(await calls(page, 'import_backup')).toHaveLength(0)
+  await page.getByRole('button', { name: '复制密码', exact: true }).click()
+  expect(await clipboard(page)).toBe('Demo! Password 中文  ')
+})
+
+test('联网校时默认关闭，正负偏差下倒计时与复制一致，失败保留及关闭回退', async ({ page }, info) => {
+  await fixture(page)
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toBeEnabled()
+  expect(await calls(page, 'set_online_time')).toHaveLength(0)
+  expect(await calls(page, 'sync_time')).toHaveLength(0)
+  await page.getByRole('button', { name: '时间校准', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('switch', { name: '联网校时' })).not.toBeChecked()
+  await dialog.getByRole('switch', { name: '联网校时' }).click()
+  await expect(dialog).toContainText('+90.000 秒')
+  await page.screenshot({ animations: 'disabled', path: info.outputPath('time-settings.png') })
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '复制验证码', exact: true }).click()
+  await expect(page.locator('.otp-card')).toContainText('网络校正时间')
+  const countdown = await page.locator('.countdown').getAttribute('aria-label')
+  expect(Number(countdown?.match(/\d+/)?.[0])).toBeGreaterThan(0)
+  expect(Number(countdown?.match(/\d+/)?.[0])).toBeLessThanOrEqual(30)
+  expect(await clipboard(page)).toBe('123456')
+  await page.evaluate(() => { (window as any).__fixture.timeOffset = -90000 })
+  await page.getByRole('button', { name: '时间校准', exact: true }).click()
+  await dialog.getByRole('button', { name: '立即校时', exact: true }).click()
+  await expect(dialog).toContainText('-90.000 秒')
+  await page.evaluate(() => { (window as any).__fixture.failTime = true })
+  await dialog.getByRole('button', { name: '立即校时', exact: true }).click()
+  await expect(dialog).toContainText('时间来源请求超时')
+  await expect(dialog).toContainText('仍在使用有效期内的上次校正结果')
+  await dialog.getByRole('switch', { name: '联网校时' }).click()
+  await expect(dialog).toContainText('0 秒')
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('.otp-card')).toContainText('本地时间')
+  await page.getByRole('button', { name: '复制验证码', exact: true }).click()
+  expect(await clipboard(page)).toBe('123456')
+})
+
+test('校时失败回退及请求中关闭，认证器读取失败不显示旧验证码', async ({ page }) => {
+  await fixture(page)
+  await page.evaluate(() => { (window as any).__fixture.failCode = true; (window as any).__fixture.failTime = true })
+  await expect(page.locator('.otp-card').getByRole('alert')).toContainText('读取认证器失败')
+  await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: '时间校准', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('switch', { name: '联网校时' }).click()
+  await expect(dialog).toContainText('时间来源请求超时')
+  await expect(dialog).toContainText('当前使用本地系统时间')
+  await page.evaluate(() => { const f = (window as any).__fixture; f.failTime = false; f.timeDelay = 1000 })
+  await dialog.getByRole('button', { name: '立即校时', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: '校时中…', exact: true })).toBeDisabled()
+  await dialog.getByRole('switch', { name: '联网校时' }).click()
+  await expect(dialog.getByRole('switch', { name: '联网校时' })).not.toBeChecked()
+  await expect.poll(() => page.evaluate(() => (window as any).__fixture.time.syncing)).toBe(false)
+  await page.evaluate(() => { (window as any).__fixture.failCode = false })
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toHaveText('123 456')
+  await page.getByRole('button', { name: '复制密码', exact: true }).click()
+  await expect(page.getByRole('button', { name: '时间校准', exact: true })).toHaveText('本地时间 · 离线')
 })
