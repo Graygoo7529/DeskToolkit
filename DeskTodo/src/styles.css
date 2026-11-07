@@ -216,3 +216,135 @@ input[type="checkbox"] { accent-color: #83cdb1; width: 17px; height: 17px; curso
 .storage-button:focus-visible { border-radius: 7px; outline-offset: 1px; }
 .paper-actions button:focus-visible, .paper-add:focus-visible, .row-delete:focus-visible { outline: 1px solid #9bb0df; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .note-sheet, .document-scroll, .slash-menu, .toast { animation: none; } }
+
+
+/* Calm note canvas: a quieter, Notion-like reading surface inside the DeskTodo shell. */
+.note-sheet {
+  border-color: #445061;
+  background: #171e29;
+  box-shadow: 0 12px 32px #0003, inset 0 1px #ffffff08;
+  backdrop-filter: blur(18px) saturate(104%);
+}
+.note-sheet::before {
+  inset: 0 24% auto 24%;
+  background: linear-gradient(90deg, transparent, #ffffff18, transparent);
+}
+.note-sheet::after {
+  box-shadow: inset 0 0 0 1px #ffffff03;
+}
+.note-toolbar {
+  border-bottom-color: #2d3745;
+  background: #1b232e;
+}
+.note-title {
+  color: #dfe3e8;
+}
+.note-title:focus {
+  color: #f1f3f5;
+  box-shadow: 0 1px 0 #9ba8b766;
+}
+.document-scroll {
+  background: #171e29;
+}
+.note-document {
+  max-width: 880px;
+  color: #cbd1d8;
+  caret-color: #c1cad3;
+}
+.note-document h1,
+.note-document h2,
+.note-document h3,
+.note-document h4,
+.note-document h5,
+.note-document h6 {
+  color: #edf0f3;
+  letter-spacing: -.35px;
+}
+.note-document strong { color: #f0f2f4; }
+.note-document em { color: #d0d1d2; }
+.note-document a { color: #b0c0d2; border-bottom-color: #7e8e9e66; }
+.note-document blockquote {
+  border-left-color: #697787;
+  background: #202833;
+  color: #aeb7c1;
+}
+.note-document hr { background: #35404e; }
+.note-document code {
+  color: #d2d8de;
+  background: #252e39;
+}
+.ordinary-code {
+  border-color: #394552;
+  background: #131922;
+  box-shadow: 0 3px 12px #0002;
+}
+.code-language { color: #84909d; }
+.ordinary-code [data-node-view-content] { color: #bcc5ce; }
+.note-document td,
+.note-document th { border-color: #3c4754; }
+.note-document th { background: #252e39; }
+
+.block-node { margin: 19px 0; }
+.todo-paper {
+  border-color: #414d5b;
+  background: #1c2530;
+  box-shadow: 0 4px 16px #0002, inset 0 1px #ffffff08;
+  color: #cbd2d9;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.todo-paper:hover {
+  border-color: #596674;
+  box-shadow: 0 6px 18px #0003, inset 0 1px #ffffff0a;
+}
+.paper-head {
+  padding: 11px 16px;
+  background: #202a35;
+  border-bottom: 1px solid #35414e;
+}
+.paper-head strong { color: #d4d9de; }
+.paper-glyph { color: #aab6bd; }
+.paper-count { color: #8f9ba7; }
+.paper-actions button { color: #929eaa; }
+.paper-actions button:hover:not(:disabled) { color: #e0e4e8; }
+.paper-progress { background: #46525e; }
+.paper-progress i { background: #9cac9f; }
+.paper-row {
+  min-height: 37px;
+  transition: background .16s ease;
+}
+.paper-row:hover,
+.paper-row:focus-within {
+  background: #ffffff06;
+  padding-left: 4px;
+}
+.paper-row input[type="checkbox"] {
+  border-color: #788592;
+  background: #202a35;
+}
+.paper-row input[type="checkbox"]:hover { border-color: #aab5bf; }
+.paper-row input[type="checkbox"]:checked {
+  background: #9caf9f;
+  border-color: #b9c8bc;
+  box-shadow: 0 0 0 3px #9caf9f12;
+}
+.paper-row input[type="checkbox"]:checked:after { color: #26342e; }
+.task-text { color: #d0d6db; }
+.task-text:focus { border-bottom-color: #82909d; }
+.task-text::placeholder { color: #7f8a95; }
+.completed .task-text { color: #818b96; text-decoration-color: #73808b; }
+.row-delete { color: #87929d; }
+.row-delete:hover { background: #a36c6c18; color: #e2a7a7; }
+.paper-add { color: #909ca7; }
+.paper-add:hover { color: #d0d6dc; }
+.paper-annotation { color: #aab4bd; }
+.formula-paper {
+  border-color: #414d5b;
+  background: #1c2530;
+  box-shadow: 0 4px 16px #0002, inset 0 1px #ffffff08;
+}
+.formula-output { color: #dbe0e4; }
+.formula-paper textarea {
+  border-top-color: #35414e;
+  color: #b7c1cb;
+  background: #18212b;
+}
