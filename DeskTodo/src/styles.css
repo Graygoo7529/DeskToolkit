@@ -348,3 +348,104 @@ input[type="checkbox"] { accent-color: #83cdb1; width: 17px; height: 17px; curso
   color: #b7c1cb;
   background: #18212b;
 }
+
+/* Deeper note surface: keep the application shell blue while letting the note read like a dark desk. */
+.note-sheet {
+  border-color: #35404e;
+  background: #111720;
+  box-shadow: 0 14px 34px #0005, inset 0 1px #ffffff06;
+  backdrop-filter: blur(18px) saturate(96%);
+}
+.note-sheet::before {
+  background: linear-gradient(90deg, transparent, #ffffff0b, transparent);
+}
+.note-toolbar {
+  border-bottom-color: #252e3a;
+  background: #151c26;
+}
+.note-title { color: #d4d9df; }
+.note-title:focus {
+  color: #eef1f4;
+  box-shadow: 0 1px 0 #8f9aa766;
+}
+.document-scroll { background: #111720; }
+.note-document { color: #c4cbd3; }
+.note-document h1,
+.note-document h2,
+.note-document h3,
+.note-document h4,
+.note-document h5,
+.note-document h6 { color: #e7ebef; }
+.note-document strong { color: #ebeff2; }
+.note-document em { color: #c9cdd2; }
+.note-document a { color: #a8b7c8; border-bottom-color: #71809155; }
+.note-document blockquote {
+  border-left-color: #5e6a78;
+  background: #1a222d;
+  color: #a7b0ba;
+}
+.note-document hr { background: #2d3743; }
+.note-document code { color: #ccd3da; background: #202934; }
+.ordinary-code {
+  border-color: #303b48;
+  background: #0d131b;
+  box-shadow: 0 4px 14px #0004;
+}
+.code-language { color: #7f8a98; }
+.ordinary-code [data-node-view-content] { color: #b5bec8; }
+.note-document td,
+.note-document th { border-color: #34404d; }
+.note-document th { background: #202934; }
+.todo-paper {
+  border-color: #374452;
+  background: #151d27;
+  box-shadow: 0 5px 18px #0004, inset 0 1px #ffffff06;
+  color: #c5cdd5;
+}
+.todo-paper:hover {
+  border-color: #4b5866;
+  box-shadow: 0 7px 20px #0005, inset 0 1px #ffffff08;
+}
+.paper-head {
+  background: #19222d;
+  border-bottom-color: #2c3744;
+}
+.paper-head strong { color: #cfd6dd; }
+.paper-glyph { color: #a2adb8; }
+.paper-count { color: #87939e; }
+.paper-actions button { color: #8b97a3; }
+.paper-actions button:hover:not(:disabled) { color: #d9dfe4; }
+.paper-progress { background: #3b4652; }
+.paper-progress i { background: #91a399; }
+.paper-row:hover,
+.paper-row:focus-within { background: #ffffff05; }
+.paper-row input[type="checkbox"] {
+  border-color: #6f7c89;
+  background: #1c2631;
+}
+.paper-row input[type="checkbox"]:hover { border-color: #9aa6b1; }
+.paper-row input[type="checkbox"]:checked {
+  background: #91a399;
+  border-color: #b1c0b5;
+  box-shadow: 0 0 0 3px #91a39910;
+}
+.paper-row input[type="checkbox"]:checked:after { color: #202d28; }
+.task-text { color: #cbd3da; }
+.task-text:focus { border-bottom-color: #788592; }
+.task-text::placeholder { color: #77838e; }
+.completed .task-text { color: #78838e; text-decoration-color: #697580; }
+.row-delete { color: #7f8b97; }
+.paper-add { color: #87939e; }
+.paper-add:hover { color: #c9d0d6; }
+.paper-annotation { color: #a1abb6; }
+.formula-paper {
+  border-color: #374452;
+  background: #151d27;
+  box-shadow: 0 5px 18px #0004, inset 0 1px #ffffff06;
+}
+.formula-output { color: #d5dce2; }
+.formula-paper textarea {
+  border-top-color: #2c3744;
+  color: #b1bbc5;
+  background: #111922;
+}
