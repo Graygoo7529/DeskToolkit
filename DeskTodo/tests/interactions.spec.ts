@@ -31,6 +31,25 @@ test("first launch is one inbox and paper with a compact reading surface", async
   expect(errors).toEqual([]);
 });
 
+test("last note and reading position restore after reopening", async ({ page }) => {
+  await start(page);
+  await page.getByRole("button", { name: "新建便签", exact: true }).click();
+  await page.getByRole("textbox", { name: "便签标题", exact: true }).fill("恢复页面");
+  const lines = Array.from({ length: 90 }, (_, index) => `第 ${index + 1} 行内容`).join("\n\n");
+  await setMarkdown(page, `# 恢复页面\n\n${lines}`);
+  const scroll = page.locator(".document-scroll");
+  await scroll.evaluate(el => {
+    el.scrollTop = el.scrollHeight;
+    el.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await page.waitForTimeout(250);
+  const savedTop = await scroll.evaluate(el => el.scrollTop);
+  expect(savedTop).toBeGreaterThan(0);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "便签标题", exact: true })).toHaveValue("恢复页面");
+  await expect.poll(() => scroll.evaluate(el => el.scrollTop), { timeout: 5000 }).toBeGreaterThan(0);
+});
+
 test("markdown input becomes formatted and stays editable with undo, IME and refresh", async ({ page }) => {
   await start(page);
   await page.getByRole("button", { name: "新建便签", exact: true }).click();
@@ -49,7 +68,8 @@ test("markdown input becomes formatted and stays editable with undo, IME and ref
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   await page.getByRole("button", { name: "重做", exact: true }).click();
   await expect(body).toContainText("中文输入");
-  await expect(page.locator(".save-status")).toHaveText("已保存");
+  await expect(page.locator(".save-status")).toHaveText("5 秒后自动保存");
+  await expect(page.locator(".save-status")).toHaveText("已保存", { timeout: 8000 });
   await page.reload();
   // Default selection is inbox's first note; choose saved second note.
   await page.locator(".note-tabs button").last().click();

@@ -38,6 +38,7 @@ kbd { font: 10px "Segoe UI", sans-serif; padding: 2px 5px; border: 1px solid #44
 .save-status { margin-left: auto; display: flex; align-items: center; gap: 8px; color: #8396af; font-size: 11px; transition: color .25s ease, opacity .25s ease; }
 .save-status i { height: 5px; width: 5px; border-radius: 50%; background: #85c7ad; box-shadow: 0 0 8px #85c7ad30; }
 .save-status[data-state="saving"] i { background: #ddbe81; }
+.save-status[data-state="pending"] i { background: #c2a36e; box-shadow: 0 0 8px #c2a36e30; }
 .save-status[data-state="error"] { color: #f2b1b9; }
 .save-status[data-state="error"] i { background: #e18d98; }
 .app-body { flex: 1; display: flex; min-height: 0; }

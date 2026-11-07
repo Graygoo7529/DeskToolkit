@@ -4,6 +4,8 @@ import { CACHE_KEY, LEGACY_KEY, parseWorkspace, type Workspace } from "./model";
 export const desktop = isTauri();
 export interface StorageState { dataDir: string | null; suggestedDir: string }
 export interface Loaded { dataDir: string; workspace: Workspace }
+export interface ViewState { clusterId: string; noteId: string; scrollTop: number; source: boolean }
+const VIEW_STATE_KEY = "desktodo-view-v1";
 const BROWSER_PATH = "浏览器本地存储";
 export async function getStorageState(): Promise<StorageState> {
   if (desktop) return invoke("get_state");
@@ -29,6 +31,27 @@ export async function changeDirectory(path: string, seed: Workspace): Promise<Lo
 export async function persist(path: string, workspace: Workspace) {
   if (desktop) await invoke("save_workspace", { path, workspace });
   else localStorage.setItem(CACHE_KEY, JSON.stringify(workspace));
+}
+// Browser localStorage is synchronous, so it can be used as the unload fallback
+// when the page is closed before the asynchronous debounce has fired.
+export function persistSync(workspace: Workspace) {
+  try { if (!desktop) localStorage.setItem(CACHE_KEY, JSON.stringify(workspace)); } catch { /* The unload path must not block the browser from closing. */ }
+}
+export function readViewState(dataDir: string): ViewState | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(VIEW_STATE_KEY) || "{}") as Record<string, Partial<ViewState>>;
+    const value = all[dataDir];
+    if (!value || typeof value.clusterId !== "string" || typeof value.noteId !== "string" || !Number.isFinite(value.scrollTop)) return null;
+    const scrollTop = value.scrollTop as number;
+    return { clusterId: value.clusterId, noteId: value.noteId, scrollTop: Math.max(0, scrollTop), source: value.source === true };
+  } catch { return null; }
+}
+export function writeViewState(dataDir: string, value: ViewState) {
+  try {
+    const all = JSON.parse(localStorage.getItem(VIEW_STATE_KEY) || "{}") as Record<string, ViewState>;
+    all[dataDir] = { ...value, scrollTop: Math.max(0, value.scrollTop) };
+    localStorage.setItem(VIEW_STATE_KEY, JSON.stringify(all));
+  } catch { /* A session snapshot must never block note editing. */ }
 }
 export async function browseDirectory(): Promise<string | null> {
   if (!desktop) return null;

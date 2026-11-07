@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Editor } from "@tiptap/core";
 import { colors, createWorkspace, errorText, newNote, uid, type Note, type Workspace } from "./model";
-import { changeDirectory, desktop, getStorageState, legacyWorkspace, openNoteFile, preserveAndReload, readWorkspace, SaveQueue, type Loaded } from "./storage";
+import { changeDirectory, desktop, getStorageState, legacyWorkspace, openNoteFile, persistSync, preserveAndReload, readViewState, readWorkspace, SaveQueue, writeViewState, type Loaded, type ViewState } from "./storage";
 import DirectoryForm from "./DirectoryForm";
 import Modal from "./Modal";
 import Icon from "./Icons";
 import NoteEditor from "./editor/NoteEditor";
+
+const AUTOSAVE_DELAY = 5000;
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -29,19 +31,53 @@ export default function App() {
   const [folderName, setFolderName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
+  const [saveState, setSaveState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const [saveError, setSaveError] = useState("");
   const saveVersion = useRef(0);
+  const dirtyVersion = useRef(0);
+  const pendingSave = useRef(false);
+  const autosaveTimer = useRef<number | null>(null);
   const title = useRef<HTMLInputElement>(null);
   const editor = useRef<Editor | null>(null);
   const closeNeeded = useRef(false);
+  const scroll = useRef<HTMLDivElement>(null);
+  const viewState = useRef<ViewState>({ clusterId: "", noteId: "", scrollTop: 0, source: false });
+  const restoreScrollTop = useRef(0);
+  const viewSaveTimer = useRef<number | null>(null);
   const [, setEditorTick] = useState(0);
 
+  const saveViewState = useCallback(() => {
+    if (!pathRef.current || !viewState.current.clusterId || !viewState.current.noteId) return;
+    writeViewState(pathRef.current, {
+      ...viewState.current,
+      scrollTop: scroll.current?.scrollTop ?? viewState.current.scrollTop,
+    });
+  }, []);
+  const scheduleViewStateSave = useCallback(() => {
+    if (viewSaveTimer.current !== null) window.clearTimeout(viewSaveTimer.current);
+    viewSaveTimer.current = window.setTimeout(() => {
+      viewSaveTimer.current = null;
+      saveViewState();
+    }, 180);
+  }, [saveViewState]);
+
   const load = useCallback((loaded: Loaded) => {
+    if (autosaveTimer.current !== null) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    if (viewSaveTimer.current !== null) { window.clearTimeout(viewSaveTimer.current); viewSaveTimer.current = null; }
+    pendingSave.current = false;
+    const remembered = readViewState(loaded.dataDir);
+    const firstCluster = loaded.workspace.clusters[0];
+    const selectedCluster = loaded.workspace.clusters.find(c => c.id === remembered?.clusterId) || firstCluster;
+    const selectedNoteId = selectedCluster.notes.some(n => n.id === remembered?.noteId)
+      ? remembered!.noteId
+      : selectedCluster.notes[0]?.id || "";
+    const restoresCurrentNote = !!remembered && selectedCluster.id === remembered.clusterId && selectedNoteId === remembered.noteId;
+    restoreScrollTop.current = restoresCurrentNote ? remembered!.scrollTop : 0;
+    viewState.current = { clusterId: selectedCluster.id, noteId: selectedNoteId, scrollTop: restoreScrollTop.current, source: restoresCurrentNote && remembered!.source };
     workspaceRef.current = loaded.workspace; pathRef.current = loaded.dataDir;
     setWorkspace(loaded.workspace); setDataDir(loaded.dataDir);
-    setWorkspaceEpoch(epoch => epoch + 1); setSource(false); setSearch("");
-    setClusterId(loaded.workspace.clusters[0].id); setNoteId(loaded.workspace.clusters[0].notes[0]?.id || "");
+    setWorkspaceEpoch(epoch => epoch + 1); setSource(viewState.current.source); setSearch("");
+    setClusterId(selectedCluster.id); setNoteId(selectedNoteId);
     setSetup(false); setSaveState("saved"); setSaveError(""); setStartupError("");
     closeNeeded.current = false;
   }, []);
@@ -56,19 +92,54 @@ export default function App() {
     finally { setStarting(false); }
   }, [load]);
   useEffect(() => { void start(); }, [start]);
+  useEffect(() => {
+    if (!workspace || !noteId || !pathRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (scroll.current) scroll.current.scrollTop = restoreScrollTop.current;
+      restoreScrollTop.current = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [workspaceEpoch, noteId]);
+  useEffect(() => {
+    if (!pathRef.current || !noteId) return;
+    const frame = window.requestAnimationFrame(saveViewState);
+    return () => window.cancelAnimationFrame(frame);
+  }, [clusterId, noteId, source, dataDir, saveViewState]);
 
   const save = useCallback((next: Workspace) => {
+    if (autosaveTimer.current !== null) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    pendingSave.current = false;
     const version = ++saveVersion.current;
+    const dirtyAtSave = dirtyVersion.current;
     setSaveState("saving"); setSaveError(""); closeNeeded.current = true;
     void queue.current.save(pathRef.current, next).then(() => {
-      if (version === saveVersion.current) { setSaveState("saved"); closeNeeded.current = false; }
+      if (version === saveVersion.current && dirtyAtSave === dirtyVersion.current && !pendingSave.current) {
+        setSaveState("saved"); closeNeeded.current = false;
+      }
     }).catch(e => {
-      if (version === saveVersion.current) { setSaveState("error"); setSaveError(errorText(e)); }
+      if (version === saveVersion.current && dirtyAtSave === dirtyVersion.current && !pendingSave.current) {
+        setSaveState("error"); setSaveError(errorText(e));
+      }
     });
   }, []);
-  const commit = useCallback((next: Workspace) => {
-    workspaceRef.current = next; setWorkspace(next); save(next);
+  const scheduleSave = useCallback(() => {
+    dirtyVersion.current++;
+    pendingSave.current = true;
+    setSaveState("pending"); setSaveError(""); closeNeeded.current = true;
+    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null;
+      if (workspaceRef.current) save(workspaceRef.current);
+    }, AUTOSAVE_DELAY);
   }, [save]);
+  const flushPending = useCallback(async () => {
+    if (autosaveTimer.current !== null) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    if (pendingSave.current && workspaceRef.current) save(workspaceRef.current);
+    await queue.current.flush();
+  }, [save]);
+  const commit = useCallback((next: Workspace) => {
+    workspaceRef.current = next; setWorkspace(next); scheduleSave();
+  }, [scheduleSave]);
   const updateNote = useCallback((changes: Partial<Note>) => {
     const previous = workspaceRef.current;
     if (!previous) return;
@@ -79,8 +150,11 @@ export default function App() {
   const updateContent = useCallback((content: string) => updateNote({ content }), [updateNote]);
   const cluster = workspace?.clusters.find(c => c.id === clusterId);
   const note = cluster?.notes.find(n => n.id === noteId);
+  viewState.current.clusterId = clusterId;
+  viewState.current.noteId = noteId;
+  viewState.current.source = source;
   const visibleNotes = cluster?.notes.filter(n => !search.trim() || (n.title + "\n" + n.content).toLowerCase().includes(search.trim().toLowerCase())) || [];
-  const switchNote = (id: string) => { setNoteId(id); setSource(false); };
+  const switchNote = (id: string) => { restoreScrollTop.current = 0; setNoteId(id); setSource(false); };
   const addNote = useCallback(() => {
     const current = workspaceRef.current;
     if (!current || !clusterId) return;
@@ -90,7 +164,8 @@ export default function App() {
     requestAnimationFrame(() => title.current?.select());
   }, [clusterId, commit]);
   const applyDirectory = async (path: string) => {
-    await queue.current.flush();
+    saveViewState();
+    await flushPending();
     const seed = workspaceRef.current || oldWorkspace || createWorkspace();
     const loaded = await changeDirectory(path, seed);
     load(loaded); setStorageOpen(false);
@@ -98,8 +173,9 @@ export default function App() {
   const reloadFiles = async (preserve = false) => {
     setReloading(true);
     try {
-      if (preserve) await queue.current.flush().catch(() => undefined);
-      else await queue.current.flush();
+      saveViewState();
+      if (preserve) await flushPending().catch(() => undefined);
+      else await flushPending();
       const loaded = preserve && workspaceRef.current
         ? await preserveAndReload(pathRef.current, workspaceRef.current)
         : await readWorkspace();
@@ -114,7 +190,7 @@ export default function App() {
   };
   const openFile = async () => {
     if (!note) return;
-    try { await queue.current.flush(); await openNoteFile(note.id); }
+    try { saveViewState(); await flushPending(); await openNoteFile(note.id); }
     catch (e) { setToast("打开文件失败：" + errorText(e)); }
   };
   const copy = async () => {
@@ -157,20 +233,32 @@ export default function App() {
       void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
         const win = getCurrentWindow();
         const dispose = await win.onCloseRequested(async event => {
+          saveViewState();
           if (!closeNeeded.current) return;
           event.preventDefault();
-          try { await queue.current.flush(); closeNeeded.current = false; await win.destroy(); }
+          try { await flushPending(); closeNeeded.current = false; await win.destroy(); }
           catch (e) { setSaveState("error"); setSaveError("关闭前保存失败：" + errorText(e)); }
         });
         if (cancelled) dispose(); else unlisten = dispose;
       });
     }
     return () => { cancelled = true; unlisten?.(); };
-  }, []);
+  }, [flushPending, saveViewState]);
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (closeNeeded.current) { event.preventDefault(); event.returnValue = ""; } };
+    const warn = (event: BeforeUnloadEvent) => {
+      saveViewState();
+      if (!closeNeeded.current) return;
+      if (!desktop && workspaceRef.current) {
+        if (autosaveTimer.current !== null) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+        pendingSave.current = false;
+        persistSync(workspaceRef.current);
+        closeNeeded.current = false;
+        return;
+      }
+      event.preventDefault(); event.returnValue = "";
+    };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
-  }, []);
+  }, [saveViewState]);
   const attachEditor = useCallback((instance: Editor | null) => {
     editor.current = instance;
     if (instance) instance.on("transaction", () => setEditorTick(t => t + 1));
@@ -188,7 +276,7 @@ export default function App() {
   if (!workspace || !cluster) return null;
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><img src="/app-icon.svg" width="33" height="33" alt="" /><strong>DeskTodo</strong><span>随手记，慢慢做。</span></div>
-      <div className="save-status" role="status" data-state={saveState}><i />{saveState === "saved" ? "已保存" : saveState === "saving" ? "正在保存…" : "未能保存"}</div>
+      <div className="save-status" role="status" data-state={saveState}><i />{saveState === "saved" ? "已保存" : saveState === "pending" ? "5 秒后自动保存" : saveState === "saving" ? "正在保存…" : "未能保存"}</div>
     </header>
     <div className="app-body">
       <aside className="sidebar">
@@ -218,7 +306,7 @@ export default function App() {
               <button className="icon-button danger" aria-label="删除便签" title="删除便签" onClick={() => setDeleting(true)}><Icon name="trash" size={16} /></button>
             </div>
           </header>
-          <div className="document-scroll" key={workspaceEpoch + ":" + note.id}>
+          <div ref={scroll} className="document-scroll" onScroll={scheduleViewStateSave} key={workspaceEpoch + ":" + note.id}>
             {source ? <textarea className="markdown-source" aria-label="Markdown 源码" value={note.content} spellCheck={false} onChange={e => updateContent(e.target.value)} />
               : <NoteEditor key={note.id} content={note.content} onChange={updateContent} onReady={attachEditor} />}
           </div>
