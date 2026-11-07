@@ -1,0 +1,6 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default", "description": "主窗口、本地文件选择与账户信息复制",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "clipboard-manager:allow-write-text"]
+}

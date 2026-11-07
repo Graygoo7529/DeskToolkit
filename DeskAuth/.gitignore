@@ -1,0 +1,6 @@
+test-results/
+playwright-report/
+**/accounts.json
+**/accounts.previous.json
+**/.deskauth.lock
+**/deskauth-backup*.json

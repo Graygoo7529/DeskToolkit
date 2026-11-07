@@ -8,6 +8,31 @@ permissions:
   contents: read
 
 jobs:
+  deskauth:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: DeskAuth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: DeskAuth/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --lib --tests -- -D warnings
+
   twofauth:
     runs-on: windows-latest
     defaults:
