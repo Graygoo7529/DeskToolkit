@@ -1,4 +1,3 @@
-mod legacy;
 mod model;
 mod otp;
 mod store;
@@ -30,7 +29,7 @@ struct AppState {
 fn snapshot(s: &store::Store) -> AppState {
     AppState {
         data_dir: s.dir.as_deref().map(store::display_path),
-        accounts: s.vault.accounts.iter().map(AccountSummary::from).collect(),
+        accounts: s.accounts.iter().map(AccountSummary::from).collect(),
         startup_error: s.startup_error.clone(),
     }
 }
@@ -190,20 +189,21 @@ fn reveal_totp_secret(state: State<Shared>, id: String) -> Result<String, String
         .clone())
 }
 #[tauri::command]
+fn copy_totp_secret(app: tauri::AppHandle, state: State<Shared>, id: String) -> Result<(), String> {
+    let secret = lock(&state)?
+        .account(&id)?
+        .totp
+        .as_ref()
+        .ok_or("此账户尚未配置认证器")?
+        .secret
+        .clone();
+    app.clipboard()
+        .write_text(secret)
+        .map_err(|_| "无法写入剪贴板，请重试".into())
+}
+#[tauri::command]
 fn parse_uri(uri: String) -> Result<otp::ParsedUri, String> {
     otp::parse_uri(&uri)
-}
-#[tauri::command]
-fn preview_twofauth(path: String) -> Result<legacy::Preview, String> {
-    legacy::preview(Path::new(&path))
-}
-#[tauri::command]
-fn select_twofauth(
-    path: String,
-    fingerprint: String,
-    id: String,
-) -> Result<otp::ParsedUri, String> {
-    legacy::select(Path::new(&path), &fingerprint, &id)
 }
 #[tauri::command]
 fn get_time_status(
@@ -257,9 +257,8 @@ pub fn run() {
             configure_totp,
             remove_totp,
             reveal_totp_secret,
+            copy_totp_secret,
             parse_uri,
-            preview_twofauth,
-            select_twofauth,
             get_time_status,
             set_online_time,
             sync_time

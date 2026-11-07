@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
 import jsQR from 'jsqr'
 import { api } from '../api'
-import type { Account, AppState, ParsedTotp, TotpInput, TwoFAuthPreview } from '../types'
+import type { Account, AppState, ParsedTotp, TotpInput } from '../types'
 import Modal from './Modal'
 import Icon from './Icon'
 
@@ -22,12 +21,11 @@ async function decodeQr(file: File): Promise<string> {
 }
 
 export default function TotpModal({ account, onClose, onSave }: { account: Account; onClose: () => void; onSave: (state: AppState) => void }) {
-  const [mode, setMode] = useState<'manual' | 'uri' | 'backup'>('manual')
+  const [mode, setMode] = useState<'manual' | 'uri'>('manual')
   const [input, setInput] = useState<TotpInput>({ secret: '', algorithm: account.totp?.algorithm ?? 'SHA1', digits: account.totp?.digits ?? 6, period: account.totp?.period ?? 30 })
   const [uri, setUri] = useState(''); const [parsed, setParsed] = useState<{ issuer: string; account: string } | null>(null)
   const [visible, setVisible] = useState(false); const [savedSecret, setSavedSecret] = useState('')
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [removing, setRemoving] = useState(false)
-  const [backup, setBackup] = useState<{ path: string; preview: TwoFAuthPreview } | null>(null); const [entry, setEntry] = useState('')
   const fileInput = useRef<HTMLInputElement>(null); const alive = useRef(true); const version = useRef(0)
   useEffect(() => {
     alive.current = true
@@ -51,10 +49,10 @@ export default function TotpModal({ account, onClose, onSave }: { account: Accou
         const file = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))?.getAsFile()
         if (file && !busy) { e.preventDefault(); void run(async () => parse(await decodeQr(file))) }
       }}><fieldset disabled={busy}>
-        <div className="segmented form-tabs">{([{ id: 'manual', label: '手动配置' }, { id: 'uri', label: '链接 / 二维码' }, { id: 'backup', label: '2FAuth 备份' }] as const).map(m => <button type="button" key={m.id} aria-pressed={mode === m.id} className={mode === m.id ? 'active' : ''} onClick={() => { setMode(m.id); setError('') }}>{m.label}</button>)}</div>
+        <div className="segmented form-tabs">{([{ id: 'manual', label: '手动配置' }, { id: 'uri', label: '链接 / 二维码' }] as const).map(m => <button type="button" key={m.id} aria-pressed={mode === m.id} className={mode === m.id ? 'active' : ''} onClick={() => { setMode(m.id); setError('') }}>{m.label}</button>)}</div>
         {mode === 'manual' && <>
           {parsed && <div className="notice success"><Icon name="check" size={16} /><span>已读取 {parsed.issuer || '认证器'} · {parsed.account}。请核对此认证信息属于上方账户，保存后生效。</span></div>}
-          <label className="field"><span>认证器共享密钥<small>{account.totp ? '留空保留原密钥' : 'Base32 格式'}</small></span><div className="input-action"><input data-autofocus aria-label="认证器共享密钥" autoComplete="off" spellCheck={false} type={visible ? 'text' : 'password'} value={input.secret ?? ''} onChange={e => setInput(prev => ({ ...prev, secret: e.target.value }))} placeholder={account.totp ? '留空保留原密钥' : '例如 JBSWY3DPEHPK3PXP'} /><button className="icon-btn" type="button" aria-label={visible ? '隐藏输入密钥' : '显示输入密钥'} onClick={() => setVisible(!visible)}><Icon name={visible ? 'hide' : 'eye'} size={16} /></button></div></label>
+          <label className="field"><span>2FA 原码（共享密钥）<small>{account.totp ? '留空保留原密钥' : 'Base32 格式'}</small></span><div className="input-action"><input data-autofocus aria-label="认证器共享密钥" autoComplete="off" spellCheck={false} type={visible ? 'text' : 'password'} value={input.secret ?? ''} onChange={e => setInput(prev => ({ ...prev, secret: e.target.value }))} placeholder={account.totp ? '留空保留原密钥' : '例如 JBSWY3DPEHPK3PXP'} /><button className="icon-btn" type="button" aria-label={visible ? '隐藏输入密钥' : '显示输入密钥'} onClick={() => setVisible(!visible)}><Icon name={visible ? 'hide' : 'eye'} size={16} /></button></div></label>
           <div className="field-grid three"><label className="field"><span>算法</span><select value={input.algorithm} onChange={e => setInput(prev => ({ ...prev, algorithm: e.target.value as TotpInput['algorithm'] }))}><option value="SHA1">HMAC-SHA-1</option><option value="SHA256">HMAC-SHA-256</option><option value="SHA512">HMAC-SHA-512</option></select></label><label className="field"><span>验证码位数</span><select value={input.digits} onChange={e => setInput(prev => ({ ...prev, digits: Number(e.target.value) }))}>{[6, 7, 8].map(d => <option key={d} value={d}>{d} 位</option>)}</select></label><label className="field"><span>时间周期（秒）</span><input type="number" min={1} max={300} required value={input.period} onChange={e => setInput(prev => ({ ...prev, period: Number(e.target.value) }))} /></label></div>
           <p className="hint">常见参数为 SHA-1、6 位、30 秒；具体以平台提供的认证信息为准。</p>
           {account.totp && <div className="totp-secret-view"><button type="button" className="text-btn" onClick={() => { if (savedSecret) { version.current++; setSavedSecret('') } else void run(async () => { const request = version.current; const value = await api.totpSecret(account.id); if (request === version.current && !document.hidden) setSavedSecret(value) }) }}><Icon name={savedSecret ? 'hide' : 'eye'} size={14} />{savedSecret ? '收起已保存密钥' : '查看已保存密钥'}</button>{savedSecret && <p className="secret-value mono selectable">{savedSecret}</p>}</div>}
@@ -63,11 +61,6 @@ export default function TotpModal({ account, onClose, onSave }: { account: Accou
           <label className="field"><span>认证链接</span><textarea rows={3} autoComplete="off" spellCheck={false} value={uri} onChange={e => setUri(e.target.value)} placeholder="otpauth://totp/…" /></label>
           <button type="button" className="btn primary full" disabled={!uri.trim()} onClick={() => run(() => parse(uri))}>解析认证链接<Icon name="arrow" size={14} /></button>
           <div className="qr-drop" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file && !busy) void run(async () => parse(await decodeQr(file))) }}><Icon name="qr" size={30} /><strong>拖入或粘贴二维码图片</strong><span>在本机解析 PNG、JPG 或 WebP 图片</span><button type="button" className="btn" onClick={() => fileInput.current?.click()}>选择二维码图片</button><input ref={fileInput} type="file" aria-label="二维码图片" hidden accept="image/png,image/jpeg,image/webp" onChange={e => { const file = e.target.files?.[0]; if (file) void run(async () => parse(await decodeQr(file))); e.target.value = '' }} /></div>
-        </>}
-        {mode === 'backup' && <>
-          <p className="hint">选择从 2FAuth 导出的备份，再选取一个认证条目关联到此账户。原文件保持原样，恢复码不导入。</p>
-          <button type="button" className="btn full" onClick={() => run(async () => { const path = await open({ title: '选择 2FAuth 备份', multiple: false, filters: [{ name: '2FAuth 备份', extensions: ['json'] }] }); if (typeof path === 'string') { const preview = await api.previewTwoFAuth(path); setBackup({ path, preview }); setEntry(preview.entries[0]?.id ?? '') } })}><Icon name="folder" size={15} />选择 2FAuth 备份</button>
-          {backup && <div className="legacy-preview"><p className="hint mono selectable">{backup.path}</p><label className="field"><span>选择认证条目</span><select value={entry} onChange={e => setEntry(e.target.value)}>{backup.preview.entries.map(a => <option key={a.id} value={a.id}>{a.issuer} · {a.account} · {a.algorithm} / {a.digits} 位 / {a.period} 秒</option>)}</select></label>{!backup.preview.entries.length && <p className="hint">此备份中没有认证条目。</p>}<button type="button" className="btn full" disabled={!entry} onClick={() => run(async () => adopt(await api.selectTwoFAuth(backup.path, backup.preview.fingerprint, entry)))}>采用选中认证信息</button></div>}
         </>}
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="modal-actions">{account.totp && <button type="button" className="text-btn danger remove-totp" onClick={() => { setRemoving(true); setSavedSecret(''); setError('') }}>移除认证器</button>}<button type="button" className="btn" onClick={onClose}>取消</button><button type="submit" className="btn primary" disabled={mode !== 'manual'}>{busy ? '保存中…' : '保存认证器'}</button></div>

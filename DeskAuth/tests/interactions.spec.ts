@@ -11,9 +11,9 @@ async function fixture(page: Page, setup = false) {
     examples[2].hasPassword = false
     examples[0].totp = { algorithm: 'SHA1', digits: 6, period: 30 }
     const state = { dataDir: setup ? null : 'B:\\Fixtures\\DeskAuth' as string | null, startupError: null, accounts: setup ? [] : examples }
-    const controls = { calls: [] as { cmd: string; args: any }[], clipboard: '', passwords: { alice: 'Demo! Password 中文  ', work: 'Work-demo-password', google: '', microsoft: 'Office-demo' } as Record<string, string>, failSave: false, failCopy: false, failDirectory: false, failImport: false, failDelete: false, delayPassword: 0, folder: 'B:\\Fixtures\\New', importFile: 'B:\\Fixtures\\backup.json', state }
+    const controls = { calls: [] as { cmd: string; args: any }[], clipboard: '', passwords: { alice: 'Demo! Password 中文  ', work: 'Work-demo-password', google: '', microsoft: 'Office-demo' } as Record<string, string>, failSave: false, failCopy: false, failDirectory: false, failImport: false, failDelete: false, delayPassword: 0, folder: 'B:\\Fixtures\\New', backupFolder: 'B:\\Fixtures\\Backup', state }
     const time = { enabled: false, syncing: false, source: 'local', offsetMs: 0, uncertaintyMs: null as number | null, lastSuccessAt: null as number | null, validUntil: null as number | null, providers: [] as string[], error: null as string | null, revision: 0 }
-    const auth = { time, totpSecrets: { alice: 'JBSWY3DPEHPK3PXP' } as Record<string, string>, nextCode: '123456', failCode: false, failTotp: false, failTime: false, failLegacy: false, timeOffset: 90000, timeDelay: 60, codeDelay: 0 }
+    const auth = { time, totpSecrets: { alice: 'JBSWY3DPEHPK3PXP' } as Record<string, string>, nextCode: '123456', failCode: false, failTotp: false, failTime: false, timeOffset: 90000, timeDelay: 60, codeDelay: 0, delaySecret: 0 }
     const startSync = () => {
       time.syncing = true; time.revision++; const revision = time.revision
       window.setTimeout(() => {
@@ -49,16 +49,14 @@ async function fixture(page: Page, setup = false) {
         return clone()
       }
       if (cmd === 'remove_totp') { const a = state.accounts.find(a => a.id === args.id)!; a.totp = null; a.updatedAt = Date.now(); return clone() }
-      if (cmd === 'reveal_totp_secret') return settings.totpSecrets[args.id]
+      if (cmd === 'reveal_totp_secret') { const secret = settings.totpSecrets[args.id]; if (settings.delaySecret) await new Promise(resolve => setTimeout(resolve, settings.delaySecret)); return secret }
+      if (cmd === 'copy_totp_secret') { if (controls.failCopy) throw '无法写入剪贴板，请重试'; controls.clipboard = settings.totpSecrets[args.id]; return }
       if (cmd === 'parse_uri') { const uri = new URL(args.uri); if (uri.protocol !== 'otpauth:' || uri.host !== 'totp') throw '仅支持 TOTP 链接'; return { issuer: uri.searchParams.get('issuer') || 'GitHub', account: 'imported@example.com', secret: uri.searchParams.get('secret'), algorithm: uri.searchParams.get('algorithm') || 'SHA1', digits: Number(uri.searchParams.get('digits') || 6), period: Number(uri.searchParams.get('period') || 30) } }
-      if (cmd === 'preview_twofauth') return { fingerprint: 'fixture-fingerprint', entries: [{ id: 'legacy', issuer: 'GitHub', account: 'legacy@example.com', algorithm: 'SHA256', digits: 8, period: 60 }] }
-      if (cmd === 'select_twofauth') { if (settings.failLegacy) throw '备份文件已变化，请重新选择文件'; return { issuer: 'GitHub', account: 'legacy@example.com', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 60 } }
       if (cmd === 'suggest_data_dir') return 'B:\\Fixtures\\DeskAuth'
-      if (cmd === 'plugin:dialog|open') return args.options?.directory ? controls.folder : controls.importFile
-      if (cmd === 'plugin:dialog|save') return 'B:\\Fixtures\\export.json'
-      if (cmd === 'change_data_dir') { if (controls.failDirectory) throw '请选择空目录或有效账户库'; state.dataDir = args.path; state.accounts = []; return clone() }
+      if (cmd === 'plugin:dialog|open') return args.options?.title === '选择 DeskAuth 备份目录' ? controls.backupFolder : controls.folder
+      if (cmd === 'change_data_dir') { if (controls.failDirectory) throw '请选择空目录或有效数据目录'; state.dataDir = args.path; state.accounts = []; return clone() }
       if (cmd === 'open_data_dir' || cmd === 'export_backup' || cmd === 'open_website') return
-      if (cmd === 'import_backup') { if (controls.failImport) throw '不支持的数据格式或版本'; return { state: clone(), added: 2, skipped: 1 } }
+      if (cmd === 'import_backup') { if (controls.failImport) throw '无效的 DeskAuth 备份目录'; return { state: clone(), added: 2, skipped: 1 } }
       if (cmd === 'reveal_password') { const password = controls.passwords[args.id]; if (controls.delayPassword) await new Promise(resolve => setTimeout(resolve, controls.delayPassword)); return password }
       if (cmd === 'copy_password') { if (controls.failCopy) throw '无法写入剪贴板，请重试'; controls.clipboard = controls.passwords[args.id]; return }
       if (cmd === 'plugin:clipboard-manager|write_text') { controls.clipboard = args.text; return }
@@ -148,7 +146,7 @@ test('快速复制无需显示密码，用户名和联系方式复制正确', as
   expect(await clipboard(page)).toBe('alice')
   await page.getByRole('button', { name: '复制邮箱 2', exact: true }).click()
   expect(await clipboard(page)).toBe('work@example.com')
-  await page.getByRole('button', { name: '打开网站', exact: true }).click()
+  await page.getByRole('button', { name: '平台主页', exact: true }).click()
   expect((await calls(page, 'open_website'))[0].args.id).toBe('alice')
   await page.evaluate(() => { (window as any).__fixture.failCopy = true })
   await page.getByRole('button', { name: '快速复制密码 GitHub alice 个人账户', exact: true }).click()
@@ -221,17 +219,18 @@ test('数据目录失败不丢失账户，备份导出与导入反馈', async ({
   await fixture(page)
   await page.getByRole('button', { name: '数据管理', exact: true }).click()
   await page.getByRole('button', { name: '导出备份', exact: true }).click()
-  expect((await calls(page, 'export_backup'))[0].args.path).toBe('B:\\Fixtures\\export.json')
+  expect((await calls(page, 'export_backup'))[0].args.path).toMatch(/deskauth-backup-.*[a-f0-9]{8}$/)
+  expect((await calls(page, 'plugin:dialog|open'))[0].args.options.directory).toBe(true)
   await page.getByRole('button', { name: '导入备份', exact: true }).click()
   await page.evaluate(() => { (window as any).__fixture.failImport = true })
   await page.getByRole('button', { name: '确认合并', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('不支持的数据格式')
+  await expect(page.getByRole('alert')).toContainText('无效的 DeskAuth 备份目录')
   await page.evaluate(() => { (window as any).__fixture.failImport = false })
   await page.getByRole('button', { name: '确认合并', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('已导入 2 个账户，跳过 1 个重复项')
   await page.evaluate(() => { (window as any).__fixture.failDirectory = true })
   await page.getByRole('button', { name: '使用此目录', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('有效账户库')
+  await expect(page.getByRole('alert')).toContainText('有效数据目录')
   await expect(rows(page)).toHaveCount(4)
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.getByRole('button', { name: '复制密码', exact: true })).toBeEnabled()
@@ -342,25 +341,47 @@ test('认证链接与真实二维码图片导入后核对参数，不改动账�
   await expect(page.getByRole('button', { name: '复制验证码', exact: true })).toBeEnabled()
 })
 
-test('2FAuth 备份仅导入选中认证条目，文件变化时阻止采用', async ({ page }) => {
+test('账户详情集中显示 2FA 原码与验证码，支持复制、失焦和迟到响应保护', async ({ page }, info) => {
   await fixture(page)
-  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  await expect(page.getByTestId('totp-secret')).toHaveText('••••••••••••••••')
+  await page.getByRole('button', { name: '复制 2FA 原码', exact: true }).click()
+  expect(await clipboard(page)).toBe('JBSWY3DPEHPK3PXP')
+  expect(await calls(page, 'reveal_totp_secret')).toHaveLength(0)
+  await page.getByRole('button', { name: '显示 2FA 原码', exact: true }).click()
+  await expect(page.getByTestId('totp-secret')).toHaveText('JBSWY3DPEHPK3PXP')
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toHaveText('123 456')
+  await page.screenshot({ animations: 'disabled', path: info.outputPath('account-2fa.png') })
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await expect(page.getByTestId('totp-secret')).toHaveText('••••••••••••••••')
+  await page.evaluate(() => { (window as any).__fixture.delaySecret = 300 })
+  await page.getByRole('button', { name: '显示 2FA 原码', exact: true }).click()
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await expect(page.getByRole('button', { name: '显示 2FA 原码', exact: true })).toBeEnabled()
+  await expect(page.getByTestId('totp-secret')).toHaveText('••••••••••••••••')
+  await page.getByRole('button', { name: '显示 2FA 原码', exact: true }).click()
+  await page.getByRole('button', { name: '选择 GitHub alice-work 工作账户', exact: true }).click()
+  await expect(page.getByTestId('totp-secret')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '配置认证器', exact: true })).toBeVisible()
+})
+
+test('平台主页独立配置、打开与清空，详情仍保留账户 2FA', async ({ page }) => {
+  await fixture(page)
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByRole('button', { name: '2FAuth 备份', exact: true }).click()
-  await dialog.getByRole('button', { name: '选择 2FAuth 备份', exact: true }).click()
-  await expect(dialog.getByRole('combobox', { name: '选择认证条目', exact: true })).toContainText('legacy@example.com')
-  await page.evaluate(() => { (window as any).__fixture.failLegacy = true })
-  await dialog.getByRole('button', { name: '采用选中认证信息', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('备份文件已变化')
-  expect(await calls(page, 'configure_totp')).toHaveLength(0)
-  await page.evaluate(() => { (window as any).__fixture.failLegacy = false })
-  await dialog.getByRole('button', { name: '采用选中认证信息', exact: true }).click()
-  await expect(dialog).toContainText('legacy@example.com')
-  await dialog.getByRole('button', { name: '保存认证器', exact: true }).click()
-  expect((await calls(page, 'configure_totp')).at(-1).args.input).toEqual({ secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 60 })
-  expect(await calls(page, 'import_backup')).toHaveLength(0)
-  await page.getByRole('button', { name: '复制密码', exact: true }).click()
-  expect(await clipboard(page)).toBe('Demo! Password 中文  ')
+  await dialog.getByRole('textbox', { name: '平台主页', exact: true }).fill('https://github.com/settings/profile')
+  await dialog.getByRole('button', { name: '保存账户', exact: true }).click()
+  expect((await calls(page, 'save_account')).at(-1).args.input.website).toBe('https://github.com/settings/profile')
+  await page.getByRole('button', { name: '平台主页', exact: true }).click()
+  expect((await calls(page, 'open_website')).at(-1).args.id).toBe('alice')
+  await page.getByRole('button', { name: '打开平台主页', exact: true }).click()
+  expect(await calls(page, 'open_website')).toHaveLength(2)
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await dialog.getByRole('textbox', { name: '平台主页', exact: true }).fill('')
+  await dialog.getByRole('button', { name: '保存账户', exact: true }).click()
+  await expect(page.getByRole('button', { name: '平台主页', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '点击复制验证码', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '管理认证器', exact: true }).click()
+  await expect(dialog.locator('.form-tabs button')).toHaveCount(2)
 })
 
 test('联网校时默认关闭，正负偏差下倒计时与复制一致，失败保留及关闭回退', async ({ page }, info) => {

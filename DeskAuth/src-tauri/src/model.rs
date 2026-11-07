@@ -65,7 +65,6 @@ pub struct Account {
     pub alias: String,
     pub username: String,
     pub password: String,
-    #[serde(default)]
     pub totp: Option<Totp>,
     pub phones: Vec<Contact>,
     pub emails: Vec<Contact>,
@@ -142,42 +141,29 @@ impl From<&Account> for AccountSummary {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Vault {
-    pub format: String,
-    pub version: u32,
-    pub accounts: Vec<Account>,
-}
-impl Default for Vault {
-    fn default() -> Self {
-        Self {
-            format: "DeskAuth".into(),
-            version: 2,
-            accounts: vec![],
+pub fn validate_accounts(accounts: &mut [Account]) -> Result<(), String> {
+    if accounts.len() > 5000 {
+        return Err("最多支持 5000 个账户".into());
+    }
+    let mut ids = HashSet::new();
+    let mut identities = HashSet::new();
+    for a in accounts {
+        validate_account(a)?;
+        if !ids.insert(a.id.clone()) {
+            return Err("数据包含重复账户 ID".into());
+        }
+        if !identities.insert((
+            a.platform.to_lowercase(),
+            a.website.trim_end_matches('/').to_owned(),
+            a.username.clone(),
+            a.alias.clone(),
+        )) {
+            return Err(
+                "已存在相同平台、网站、用户名和别名的账户；可编辑原记录或使用不同别名".into(),
+            );
         }
     }
-}
-impl Vault {
-    pub fn validate(&mut self) -> Result<(), String> {
-        if self.format != "DeskAuth" || ![1, 2].contains(&self.version) {
-            return Err("不支持的数据格式或版本，需要 DeskAuth v1 / v2 备份".into());
-        }
-        if self.accounts.len() > 5000 {
-            return Err("最多支持 5000 个账户".into());
-        }
-        let mut ids = HashSet::new();
-        for a in &mut self.accounts {
-            if self.version == 1 && a.totp.is_some() {
-                return Err("v1 账户库不应包含认证器数据，请核对文件版本".into());
-            }
-            validate_account(a)?;
-            if !ids.insert(a.id.clone()) {
-                return Err("数据包含重复账户 ID".into());
-            }
-        }
-        Ok(())
-    }
+    Ok(())
 }
 pub fn now_ms() -> Result<u64, String> {
     SystemTime::now()

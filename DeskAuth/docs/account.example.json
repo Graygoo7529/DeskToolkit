@@ -1,0 +1,52 @@
+{
+  "format": "DeskAuthAccount",
+  "account": {
+    "id": "a7dc338f-c7c7-4d36-af01-bdd67e3c8441",
+    "platform": "GitHub",
+    "website": "https://github.com",
+    "alias": "个人账户",
+    "username": "example-user",
+    "password": "Example-only-password",
+    "phones": [
+      {
+        "id": "22af3139-7d60-4eba-a142-d300f7e971c6",
+        "value": "+86 138 0000 0000",
+        "label": "个人",
+        "purposes": [
+          "login",
+          "recovery"
+        ],
+        "primary": true,
+        "notes": "演示号码"
+      }
+    ],
+    "emails": [
+      {
+        "id": "01bbb006-1297-4799-a77e-4e92e99c4fdd",
+        "value": "example@example.com",
+        "label": "个人",
+        "purposes": [
+          "verify"
+        ],
+        "primary": true,
+        "notes": ""
+      }
+    ],
+    "totp": {
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30
+    },
+    "group": "个人",
+    "tags": [
+      "演示"
+    ],
+    "color": "#A7B8EF",
+    "favorite": false,
+    "notes": "虚构示例；文件名应为 a7dc338f-c7c7-4d36-af01-bdd67e3c8441.json。",
+    "createdAt": 1794000000000,
+    "updatedAt": 1794000000000,
+    "passwordUpdatedAt": 1794000000000
+  }
+}

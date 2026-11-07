@@ -321,8 +321,6 @@ kbd { color: #56677f; font-size: 8px; border: 1px solid #263044; border-radius: 
 .totp-target span { min-width: 0; }
 .totp-secret-view { margin: 16px 0; }
 .remove-totp { margin-right: auto; }
-.legacy-preview { border: 1px solid #2c3b54; border-radius: 9px; padding: 15px; margin-top: 15px; background: #101a29; }
-.legacy-preview > p { overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .totp-empty { flex-wrap: wrap; } .totp-empty > .btn { margin-left: 49px; }
   .time-button { font-size: 9px; } .topbar-right { gap: 8px; }
@@ -332,3 +330,23 @@ kbd { color: #56677f; font-size: 8px; border: 1px solid #263044; border-radius: 
 .qr-drop { display: flex; flex-direction: column; align-items: center; gap: 13px; padding: 31px 20px; margin: 24px 0 14px; color: #93a5c8; border: 1px dashed #465573; border-radius: 12px; background: #121b2b; }
 .qr-drop strong { font-size: 12px; font-weight: 500; }
 .qr-drop span { color: #7185a6; font-size: 10px; }
+
+.totp-secret-row { display: flex; align-items: center; gap: 9px; padding: 14px 0; margin-top: 10px; border-bottom: 1px solid #2e3d58; }
+.totp-secret-row > .mono { flex: 1; min-width: 0; color: #b4c5e6; font-size: 11px; overflow-wrap: anywhere; }
+.totp-secret-row .credential-label { width: 74px; flex-shrink: 0; }
+.totp-secret-row .masked { letter-spacing: 2px; color: #829bbf; }
+.totp-secret-row .icon-btn { flex-shrink: 0; width: 26px; height: 26px; }
+.totp-code-label { color: #7189b0; font-size: 10px; margin-top: 16px; }
+.website-line { border: none; background: none; padding: 0; width: 100%; text-align: left; cursor: pointer; }
+.website-line > span { min-width: 0; overflow-wrap: anywhere; }
+.website-line:hover { color: #b6c8ed; }
+.homepage-button { flex-shrink: 0; }
+.backup-path { overflow-wrap: anywhere; }
+.account-access-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.account-access-grid > .otp-card, .account-access-grid > .totp-empty { margin-top: 0; }
+.account-access-grid .otp-value { font-size: clamp(24px, 2.8vw, 36px); letter-spacing: 2px; }
+.account-access-grid .credentials-card { display: flex; flex-direction: column; }
+.account-access-grid .credential-actions { margin-top: auto; padding-top: 25px; }
+.account-access-grid .totp-empty { flex-wrap: wrap; align-content: center; }
+.account-access-grid .totp-empty > .btn { margin-left: 49px; }
+@media (max-width: 1100px) { .account-access-grid { grid-template-columns: minmax(0, 1fr); } }

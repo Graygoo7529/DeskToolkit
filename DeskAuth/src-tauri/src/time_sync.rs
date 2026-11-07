@@ -387,7 +387,7 @@ async fn fetch_time() -> Result<Calibration, String> {
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(3))
         .timeout(Duration::from_secs(5))
-        .user_agent("DeskAuth-Time/0.2")
+        .user_agent(concat!("DeskAuth-Time/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|_| "无法初始化 HTTPS 校时")?;
     let start = Instant::now();

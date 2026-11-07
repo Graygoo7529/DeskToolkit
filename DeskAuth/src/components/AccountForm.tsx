@@ -5,7 +5,7 @@ import Icon from './Icon'
 import Modal from './Modal'
 
 const palette = ['#A7B8EF', '#86CDB7', '#DDB18D', '#C7A4DE', '#86C6DC', '#DDA5B5', '#C4CC8C', '#A4BFDA']
-const presets = [{ name: 'GitHub', url: 'https://github.com' }, { name: 'Google', url: 'https://accounts.google.com' }, { name: 'Microsoft', url: 'https://account.microsoft.com' }]
+const presets = [{ name: 'GitHub', url: 'https://github.com' }, { name: 'Google', url: 'https://www.google.com' }, { name: 'Microsoft', url: 'https://www.microsoft.com' }]
 
 function ContactEditor({ kind, items, onChange }: { kind: ContactKind; items: Contact[]; onChange: (items: Contact[]) => void }) {
   const name = kind === 'phones' ? '手机号' : '邮箱'
@@ -42,7 +42,7 @@ export default function AccountForm({ account, groups, platforms, onClose, onSav
       {!account && <div className="presets">{presets.map(p => <button type="button" key={p.name} className={form.platform === p.name ? 'selected' : ''} onClick={() => setForm(prev => ({ ...prev, platform: p.name, website: prev.website || p.url }))}>{p.name}</button>)}<span>或填写任意平台</span></div>}
       <div className="field-grid"><label className="field"><span>平台 <small>必填</small></span><input data-autofocus required maxLength={120} list="platform-suggestions" value={form.platform} onChange={e => set('platform', e.target.value)} placeholder="例如 GitHub" /></label><label className="field"><span>账户别名</span><input maxLength={120} value={form.alias} onChange={e => set('alias', e.target.value)} placeholder="例如 个人 / 工作账户" /></label></div>
       <datalist id="platform-suggestions">{[...new Set([...platforms, ...presets.map(p => p.name)])].map(p => <option key={p} value={p} />)}</datalist>
-      <label className="field"><span>网站地址</span><input type="url" maxLength={2048} value={form.website} onChange={e => set('website', e.target.value)} placeholder="https://example.com" /></label>
+      <label className="field"><span>平台主页</span><input type="url" maxLength={2048} value={form.website} onChange={e => set('website', e.target.value)} placeholder="https://example.com" /></label>
       <label className="field"><span>用户名 <small>必填，可填写登录手机号或邮箱</small></span><input required maxLength={320} value={form.username} spellCheck={false} onChange={e => set('username', e.target.value)} placeholder="平台用户名 / 登录标识" /></label>
       <div className="field"><span>密码{!account && <small>可稍后填写</small>}</span>
         {account && <div className="segmented password-modes" aria-label="密码处理方式">{([{ value: 'keep', label: '保留原密码' }, { value: 'replace', label: '更换密码' }, { value: 'clear', label: '清空密码' }] as const).map(m => <button type="button" key={m.value} aria-pressed={passwordMode === m.value} className={passwordMode === m.value ? 'active' : ''} onClick={() => { setPasswordMode(m.value); setVisible(false) }}>{m.label}</button>)}</div>}

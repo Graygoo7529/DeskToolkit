@@ -28,4 +28,3 @@ export interface TimeStatus {
   providers: string[]; error: string | null; revision: number
 }
 export interface OtpCode { code: string; period: number; validUntil: number; generatedAt: number; timeStatus: TimeStatus }
-export interface TwoFAuthPreview { fingerprint: string; entries: (TotpSummary & { id: string; issuer: string; account: string })[] }

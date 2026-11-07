@@ -28,10 +28,10 @@ try {
     for ($smokeAttempt = 0; $smokeAttempt -lt 40; $smokeAttempt++) {
         $smokeElements = $smokeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         $smokeNames = @($smokeElements | ForEach-Object { $_.Current.Name })
-        if (($smokeNames -contains '本地数据管理') -and ($smokeNames -contains 'accounts.json')) { break }
+        if (($smokeNames -contains '本地数据管理') -and ($smokeNames -contains 'accounts/<账户 ID>.json')) { break }
         Start-Sleep -Milliseconds 250
     }
-    if ($smokeNames -notcontains '本地数据管理' -or $smokeNames -notcontains 'accounts.json') { throw 'Native data management did not load.' }
+    if ($smokeNames -notcontains '本地数据管理' -or $smokeNames -notcontains 'accounts/<账户 ID>.json') { throw 'Native data management did not load.' }
     $smokeCloseButton = $smokeRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '关闭弹窗'))
     $smokeCloseButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $smokeTimeButton = $smokeRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '时间校准'))
