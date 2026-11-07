@@ -5,6 +5,30 @@ export const contactKey = (value: string, kind: ContactKind) => kind === 'phones
 export const sortAccounts = (a: Account, b: Account) => Number(b.favorite) - Number(a.favorite)
   || a.platform.localeCompare(b.platform, 'zh-CN') || a.username.localeCompare(b.username, 'zh-CN') || a.alias.localeCompare(b.alias, 'zh-CN')
 
+export const accountSorts = [
+  { value: 'name-asc', label: '名称 A → Z' },
+  { value: 'name-desc', label: '名称 Z → A' },
+  { value: 'username', label: '用户名 A → Z' },
+  { value: 'updated', label: '最近更新' },
+  { value: 'created', label: '最近添加' },
+  { value: 'favorites', label: '收藏优先' },
+] as const
+export type AccountSort = typeof accountSorts[number]['value']
+
+export function compareAccounts(a: Account, b: Account, order: AccountSort) {
+  const name = a.platform.localeCompare(b.platform, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  const username = a.username.localeCompare(b.username, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  const fallback = name || username || a.alias.localeCompare(b.alias, 'zh-CN') || a.id.localeCompare(b.id)
+  switch (order) {
+    case 'name-desc': return -name || username || fallback
+    case 'username': return username || fallback
+    case 'updated': return b.updatedAt - a.updatedAt || fallback
+    case 'created': return b.createdAt - a.createdAt || fallback
+    case 'favorites': return Number(b.favorite) - Number(a.favorite) || fallback
+    default: return fallback
+  }
+}
+
 export function matchesAccount(a: Account, query: string, platform: string) {
   if (!norm(`${a.platform} ${a.website}`).includes(norm(platform))) return false
   const text = norm([a.platform, a.website, a.alias, a.username, a.group, ...a.tags, a.notes,

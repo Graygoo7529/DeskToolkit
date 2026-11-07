@@ -13,6 +13,10 @@
 5. 在详情页点击“配置认证器”，关联此账户的 TOTP 密钥。配置后可在账户详情查看和复制 2FA 原码（Base32 密钥）与动态验证码。
 6. 点击详情顶部“平台主页”，使用系统浏览器打开配置的网址。
 
+左侧标题栏提供搜索、排序和添加按钮；账户搜索支持 `Ctrl+K` 展开、`Esc` 收起，收起时清除搜索条件。平台检索始终保留，可组合分组、收藏筛选；支持名称升降序、用户名、最近更新、最近添加和收藏优先排序，切换排序保留当前选中账户。列表占用侧栏剩余空间并独立滚动。
+
+界面采用低饱和深灰蓝配色，统一登录、2FA 与联系方式卡片的边框、留白和按钮；悬停时显示轻微的方框光晕，设置说明可按需展开。图标沿用工具组的渐变底色与白色线条。
+
 同一平台支持多个账户。平台、主页、用户名和别名全部相同的记录会被视为重复；可以通过别名区分同名的个人、工作账户。密码可暂时留空，登录标识可填写用户名、邮箱或手机号。
 
 密码默认遮挡，点击眼睛图标查看；切换账户、更新记录或窗口失焦后收起。编辑时默认保留原密码，可以明确选择更换或清空；新密码按原文保存，包括首尾空格。剪贴板由系统管理，本版本不自动清空。
@@ -113,9 +117,9 @@ DeskAuth 不使用用户指定排除的 1427，也不使用 1420。
 Windows 构建产物：
 
 - `src-tauri/target/release/deskauth.exe`：直接运行的程序，需要 WebView2 Runtime。
-- `src-tauri/target/release/bundle/nsis/DeskAuth_0.3.0_x64-setup.exe`：NSIS 安装包。
+- `src-tauri/target/release/bundle/nsis/DeskAuth_0.4.0_x64-setup.exe`：NSIS 安装包。
 
-图标源文件为 `app-icon.svg`，可用 `pnpm tauri icon app-icon.svg` 重新生成平台资源。
+图标源文件为 `app-icon.svg`，前端使用相同的 `public/app-icon.svg`；修改时需同步两处 SVG，可用 `pnpm tauri icon app-icon.svg` 重新生成平台资源。
 
 ## 验证
 
@@ -130,6 +134,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/native-smoke.ps1
 
 Rust 测试使用真实临时目录，覆盖持久化、密码原文保存 / 保留 / 清空、多联系方式、输入校验、备份与重复合并、目录锁、外部修改、损坏数据、目录切换和写入失败，以及单账户文件隔离、历史归档与恢复、目录备份、文件名校验、认证器保留 / 移除 / 备份、RFC 6238 的 18 个标准向量和校时状态处理。真实 HTTPS 来源测试默认忽略，可用 `cargo test --manifest-path src-tauri/Cargo.toml --locked live_https_sources -- --ignored --nocapture` 单独运行。
 
-Playwright 通过 Edge 和模拟 Tauri IPC 验证 15 项界面交互，包含真实二维码图片识别、认证器配置 / 修改 / 复制、原码显示与复制、平台主页、时间偏差与失败回退，全部使用虚构账户与密钥。原生冒烟脚本通过 UI Automation 检查实际 exe、打包前端、Rust 状态读取、数据管理与时间校准面板，不创建账户库、修改设置或剪贴板。
+Playwright 通过 Edge 和模拟 Tauri IPC 验证 16 项界面交互，包含真实二维码图片识别、认证器配置 / 修改 / 复制、原码显示与复制、平台主页、时间偏差与失败回退，并检查收起搜索、排序保留选择和长列表独立滚动，全部使用虚构账户与密钥。原生冒烟脚本通过 UI Automation 检查实际 exe、打包前端、Rust 状态读取、数据管理与时间校准面板，不创建账户库、修改设置或剪贴板。
 
 截图同样使用测试中的虚构资料；首次运行不会自动创建演示账户。

@@ -17,11 +17,11 @@ try {
             $smokeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($smokeProcess.MainWindowHandle)
             $smokeElements = $smokeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
             $smokeNames = @($smokeElements | ForEach-Object { $_.Current.Name })
-            if ($smokeNames -contains '选择数据目录' -or $smokeNames -contains '添加平台账户') { break }
+            if ($smokeNames -contains '选择数据目录' -or $smokeNames -contains '添加账户') { break }
         }
         Start-Sleep -Milliseconds 250
     }
-    if ($smokeNames -notcontains '选择数据目录' -and $smokeNames -notcontains '添加平台账户') { throw 'Native frontend did not reach its loaded state.' }
+    if ($smokeNames -notcontains '选择数据目录' -and $smokeNames -notcontains '添加账户') { throw 'Native frontend did not reach its loaded state.' }
     $smokeDataButton = $smokeRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, '数据管理'))
     if ($null -eq $smokeDataButton) { throw 'Data management entry is missing.' }
     $smokeDataButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()

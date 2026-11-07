@@ -1,6 +1,6 @@
 [package]
 name = "deskauth"
-version = "0.3.0"
+version = "0.4.0"
 description = "DeskAuth - 本地账户资料管理工具"
 edition = "2021"
 
