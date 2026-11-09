@@ -7,6 +7,7 @@ import Modal from "./Modal";
 import Icon from "./Icons";
 import NoteEditor from "./editor/NoteEditor";
 import SortableList from "./SortableList";
+import FolderMenu from "./FolderMenu";
 
 const AUTOSAVE_DELAY = 5000;
 
@@ -314,17 +315,15 @@ export default function App() {
     <div className="app-body">
       <aside className="sidebar">
         <div className="sidebar-label"><span>NOTE 夹</span><button className="icon-button" aria-label="新建 note 夹" title="新建 note 夹" onClick={() => { setFolderName(""); setFolderDialog("new"); }}><Icon name="plus" size={16} /></button></div>
-        <nav className="folder-list-nav" aria-label="Note 夹"><SortableList className="folder-list" items={workspace.clusters} label={c => c.name} onReorder={reorderClusters} render={c => <div className="folder-entry">
-          <button data-drag-surface className={"folder" + (c.id === clusterId ? " active" : "")} style={{ "--folder-color": c.color } as CSSProperties} onClick={() => { setClusterId(c.id); switchNote(c.notes[0]?.id || ""); setSearch(""); }}>
+        <nav className="folder-list-nav" aria-label="Note 夹"><SortableList className="folder-list" items={workspace.clusters} label={c => c.name} onReorder={reorderClusters} render={c => <button data-drag-surface className={"folder" + (c.id === clusterId ? " active" : "")} style={{ "--folder-color": c.color } as CSSProperties} onClick={() => { setClusterId(c.id); switchNote(c.notes[0]?.id || ""); setSearch(""); }}>
             <Icon name="folder" /><span>{c.name}</span><small>{c.notes.length}</small>
-          </button>
-          <button className="folder-delete" aria-label={`删除 note 夹 ${c.name}`} title={workspace.clusters.length === 1 ? "至少保留一个 note 夹" : `删除 note 夹 ${c.name}`} disabled={workspace.clusters.length === 1} onClick={() => setDeletingFolderId(c.id)}><Icon name="trash" size={14} /></button>
-        </div>} /></nav>
+          </button>} /></nav>
         <button className="storage-button" onClick={() => setStorageOpen(true)}><Icon name="settings" size={16} /><span>数据目录<small>{desktop ? "保存在此设备" : "浏览器预览"}</small></span></button>
       </aside>
       <main className="workspace">
-        <div className="workspace-head"><div className="breadcrumb"><Icon name="folder" size={15} /><span>{cluster.name}</span><button className="icon-button" aria-label="重命名 note 夹" onClick={() => { setFolderName(cluster.name); setFolderDialog("rename"); }}><Icon name="edit" size={13} /></button></div>
+        <div className="workspace-head"><div className="breadcrumb"><Icon name="folder" size={15} /><span>{cluster.name}</span></div>
           <label className="search"><Icon name="search" size={15} /><input aria-label="搜索当前 note 夹" placeholder="搜索此夹…" value={search} onChange={e => setSearch(e.target.value)} /></label>
+          <FolderMenu key={cluster.id} name={cluster.name} canDelete={workspace.clusters.length > 1} onRename={() => { setFolderName(cluster.name); setFolderDialog("rename"); }} onDelete={() => setDeletingFolderId(cluster.id)} />
         </div>
         <div className="tabs-row"><nav className="note-tabs" aria-label="夹内便签切换">{visibleNotes.length > 0 && <SortableList className="note-tabs-sortable" items={visibleNotes} disabled={!!search.trim()} label={n => n.title || "未命名便签"} onReorder={reorderNotes} render={n => <button data-drag-surface className={n.id === noteId ? "selected" : ""} aria-current={n.id === noteId ? "page" : undefined} title={n.title} onClick={() => switchNote(n.id)}>{n.title || "未命名便签"}</button>} />}{search && !visibleNotes.length && <span className="no-results">没有匹配的便签</span>}</nav>
           <button className="icon-button new-note" title="新建便签 · Ctrl+Shift+N" aria-label="新建便签" onClick={addNote}><Icon name="plus" /></button>
