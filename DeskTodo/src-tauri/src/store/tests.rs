@@ -62,6 +62,10 @@ fn legacy_migration_is_lossless_idempotent_and_keeps_originals() {
     assert_eq!(body(&migrated), seed().clusters[0].notes[0].content);
     let again = load(root.path()).unwrap();
     assert_eq!(migrated.files, again.files);
+    fs::remove_file(root.path().join(INDEX)).unwrap();
+    let rebuilt = load(root.path()).unwrap();
+    assert_eq!(rebuilt.workspace.clusters.len(), 2);
+    assert!(!root.path().join("收件箱 (3)").exists());
     assert_eq!(fs::read(root.path().join("workspace.json")).unwrap(), old);
     assert_eq!(
         fs::read(root.path().join("workspace.json.bak")).unwrap(),
@@ -197,7 +201,7 @@ fn interrupted_creation_can_be_retried() {
 }
 
 #[test]
-fn corrupt_unrelated_and_traversal_data_are_rejected() {
+fn corrupt_cache_is_rebuilt_without_following_unsafe_paths() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("other.txt"), "keep").unwrap();
     assert!(prepare(root.path(), &seed()).is_err());
@@ -212,10 +216,175 @@ fn corrupt_unrelated_and_traversal_data_are_rejected() {
     let mut index = first.index;
     index.clusters[0].directory = "../outside".into();
     fs::write(fresh.path().join(INDEX), json(&index).unwrap()).unwrap();
-    assert!(load(fresh.path()).is_err());
+    let rebuilt = load(fresh.path()).unwrap();
+    assert_eq!(body(&rebuilt), seed().clusters[0].notes[0].content);
+    assert!(fresh.path().join(".desktodo/index.invalid.json").is_file());
     assert!(resolve(fresh.path(), "../outside/file.md").is_err());
     assert!(!valid_change(".desktodo/../../outside.md"));
     assert!(prepare(Path::new("relative"), &seed()).is_err());
+}
+
+#[test]
+fn missing_and_new_markdown_files_reconcile_from_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let first = prepare(root.path(), &seed()).unwrap();
+    let folder = &first.index.clusters[0];
+    let old_path = root
+        .path()
+        .join(&folder.directory)
+        .join(&folder.notes[0].file);
+    fs::remove_file(old_path).unwrap();
+    fs::write(
+        root.path().join(&folder.directory).join("External note.md"),
+        "from disk",
+    )
+    .unwrap();
+    let loaded = load(root.path()).unwrap();
+    assert_eq!(loaded.workspace.clusters[0].notes.len(), 1);
+    assert_eq!(loaded.workspace.clusters[0].notes[0].title, "External note");
+    assert_eq!(body(&loaded), "from disk");
+}
+
+#[test]
+fn deleting_a_folder_does_not_create_a_recovery_copy() {
+    let root = tempfile::tempdir().unwrap();
+    let first = prepare(root.path(), &seed()).unwrap();
+    let removed = first.index.clusters[0].clone();
+    let mut next = first.workspace.clone();
+    next.clusters.clear();
+    next.clusters.push(Cluster {
+        id: "keep-folder".into(),
+        name: "Keep".into(),
+        icon: "folder".into(),
+        color: "#88c9b6".into(),
+        notes: Vec::new(),
+    });
+    let saved = save(root.path(), &next, &first).unwrap();
+    assert!(saved
+        .workspace
+        .clusters
+        .iter()
+        .all(|folder| folder.id != removed.id));
+    assert!(!root
+        .path()
+        .join(format!(".desktodo/deleted/{}.md", backup_key("note")))
+        .exists());
+    assert!(!root.path().join(&removed.directory).exists());
+}
+
+#[test]
+fn saving_one_note_does_not_restore_missing_files_or_overwrite_other_external_edits() {
+    let root = tempfile::tempdir().unwrap();
+    let mut data = seed();
+    for (id, title) in [("edited", "Edited"), ("missing", "Missing")] {
+        let mut note = data.clusters[0].notes[0].clone();
+        note.id = id.into();
+        note.title = title.into();
+        data.clusters[0].notes.push(note);
+    }
+    let mut other_folder = data.clusters[0].clone();
+    other_folder.id = "gone-folder".into();
+    other_folder.name = "Gone".into();
+    other_folder.notes.clear();
+    data.clusters.push(other_folder);
+    let first = prepare(root.path(), &data).unwrap();
+    let folder = root.path().join(&first.index.clusters[0].directory);
+    fs::remove_file(folder.join("Missing.md")).unwrap();
+    fs::remove_dir(root.path().join("Gone")).unwrap();
+    fs::write(folder.join("Edited.md"), "external version").unwrap();
+    fs::write(folder.join("Added.md"), "new external note").unwrap();
+    data.clusters[0].notes[0].content = "local version".into();
+    let saved = save(root.path(), &data, &first).unwrap();
+    assert!(!folder.join("Missing.md").exists());
+    assert!(!root.path().join("Gone").exists());
+    assert_eq!(
+        fs::read_to_string(folder.join("Edited.md")).unwrap(),
+        "external version"
+    );
+    assert_eq!(
+        fs::read_to_string(folder.join("Added.md")).unwrap(),
+        "new external note"
+    );
+    // Saving elsewhere must not silently adopt the external version as the edit baseline.
+    data.clusters[0].notes[1].content = "stale local edit".into();
+    assert!(save(root.path(), &data, &saved).is_err());
+    let loaded = load(root.path()).unwrap();
+    assert_eq!(loaded.workspace.clusters.len(), 1);
+    assert_eq!(loaded.workspace.clusters[0].notes.len(), 3);
+    assert_eq!(body(&loaded), "local version");
+}
+
+#[test]
+fn reorder_persists_without_rewriting_markdown_and_external_names_are_discovered() {
+    let root = tempfile::tempdir().unwrap();
+    let mut data = seed();
+    let mut second = data.clusters[0].notes[0].clone();
+    second.id = "second".into();
+    second.title = "Second".into();
+    data.clusters[0].notes.push(second);
+    let first = prepare(root.path(), &data).unwrap();
+    data.clusters[0].notes.reverse();
+    let (_, journal) = plan(root.path(), &data, Some(&first)).unwrap();
+    assert!(journal
+        .changes
+        .iter()
+        .all(|change| change.path.starts_with(".desktodo/")));
+    save(root.path(), &data, &first).unwrap();
+    let loaded = load(root.path()).unwrap();
+    assert_eq!(loaded.workspace.clusters[0].notes[0].id, "second");
+    fs::rename(
+        root.path().join("收件箱/Second.md"),
+        root.path().join("收件箱/Renamed.MD"),
+    )
+    .unwrap();
+    fs::create_dir(root.path().join("New folder")).unwrap();
+    fs::write(
+        root.path().join("New folder/From filename.md"),
+        "# Different heading",
+    )
+    .unwrap();
+    let discovered = load(root.path()).unwrap();
+    assert_eq!(discovered.workspace.clusters[0].notes[1].title, "Renamed");
+    assert_eq!(
+        discovered.workspace.clusters[1].notes[0].title,
+        "From filename"
+    );
+    assert!(valid_change("收件箱/Renamed.MD"));
+}
+
+#[test]
+fn missing_or_broken_index_and_empty_workspace_can_recover() {
+    let root = tempfile::tempdir().unwrap();
+    let first = prepare(root.path(), &seed()).unwrap();
+    fs::remove_file(root.path().join(INDEX)).unwrap();
+    assert_eq!(body(&load(root.path()).unwrap()), body(&first));
+    fs::write(root.path().join(INDEX), "{ invalid").unwrap();
+    assert_eq!(body(&load(root.path()).unwrap()), body(&first));
+    fs::remove_file(root.path().join("收件箱/随手记.md")).unwrap();
+    fs::remove_dir(root.path().join("收件箱")).unwrap();
+    let empty = load(root.path()).unwrap();
+    assert_eq!(empty.workspace.clusters.len(), 1);
+    assert!(empty.workspace.clusters[0].notes.is_empty());
+}
+
+#[test]
+fn deleting_folder_leaves_attachments_intact_without_reimporting_it() {
+    let root = tempfile::tempdir().unwrap();
+    let first = prepare(root.path(), &seed()).unwrap();
+    fs::write(root.path().join("收件箱/attachment.txt"), "keep").unwrap();
+    let mut data = first.workspace.clone();
+    data.clusters[0].id = "replacement".into();
+    data.clusters[0].name = "Keep".into();
+    data.clusters[0].notes.clear();
+    save(root.path(), &data, &first).unwrap();
+    let loaded = load(root.path()).unwrap();
+    assert_eq!(loaded.workspace.clusters.len(), 1);
+    assert_eq!(loaded.workspace.clusters[0].name, "Keep");
+    assert_eq!(
+        fs::read_to_string(root.path().join("收件箱/attachment.txt")).unwrap(),
+        "keep"
+    );
+    assert!(!root.path().join("收件箱/随手记.md").exists());
 }
 
 #[test]

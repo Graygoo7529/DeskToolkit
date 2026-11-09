@@ -6,6 +6,7 @@ import DirectoryForm from "./DirectoryForm";
 import Modal from "./Modal";
 import Icon from "./Icons";
 import NoteEditor from "./editor/NoteEditor";
+import SortableList from "./SortableList";
 
 const AUTOSAVE_DELAY = 5000;
 
@@ -30,6 +31,7 @@ export default function App() {
   const [folderDialog, setFolderDialog] = useState<"new" | "rename" | null>(null);
   const [folderName, setFolderName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [deletingFolderId, setDeletingFolderId] = useState("");
   const [toast, setToast] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const [saveError, setSaveError] = useState("");
@@ -150,6 +152,7 @@ export default function App() {
   const updateContent = useCallback((content: string) => updateNote({ content }), [updateNote]);
   const cluster = workspace?.clusters.find(c => c.id === clusterId);
   const note = cluster?.notes.find(n => n.id === noteId);
+  const folderToDelete = workspace?.clusters.find(c => c.id === deletingFolderId);
   viewState.current.clusterId = clusterId;
   viewState.current.noteId = noteId;
   viewState.current.source = source;
@@ -207,25 +210,55 @@ export default function App() {
     }
     setFolderDialog(null);
   };
+  const reorderClusters = useCallback((ids: string[]) => {
+    const current = workspaceRef.current;
+    if (!current || ids.length !== current.clusters.length) return;
+    const byId = new Map(current.clusters.map(folder => [folder.id, folder]));
+    const clusters = ids.map(id => byId.get(id)).filter((folder): folder is Workspace["clusters"][number] => !!folder);
+    if (clusters.length === current.clusters.length) commit({ clusters });
+  }, [commit]);
+  const reorderNotes = useCallback((ids: string[]) => {
+    const current = workspaceRef.current;
+    const selected = current?.clusters.find(folder => folder.id === clusterId);
+    if (!current || !selected || ids.length !== selected.notes.length) return;
+    const byId = new Map(selected.notes.map(item => [item.id, item]));
+    const notes = ids.map(id => byId.get(id)).filter((item): item is Note => !!item);
+    if (notes.length !== selected.notes.length) return;
+    commit({ clusters: current.clusters.map(folder => folder.id === selected.id ? { ...folder, notes } : folder) });
+  }, [clusterId, commit]);
   const deleteNote = () => {
     if (!workspace || !cluster || !note) return;
     const notes = cluster.notes.filter(n => n.id !== note.id);
     commit({ clusters: workspace.clusters.map(c => c.id === clusterId ? { ...c, notes } : c) });
     setNoteId(notes[0]?.id || ""); setDeleting(false); setSource(false);
   };
+  const deleteFolder = () => {
+    const current = workspaceRef.current;
+    const target = current?.clusters.find(folder => folder.id === deletingFolderId);
+    if (!current || !target || current.clusters.length <= 1) return;
+    const index = current.clusters.findIndex(folder => folder.id === target.id);
+    const clusters = current.clusters.filter(folder => folder.id !== target.id);
+    const next = clusters[Math.min(index, clusters.length - 1)];
+    const updated = { clusters };
+    commit(updated); save(updated);
+    setDeletingFolderId("");
+    if (target.id === clusterId) {
+      setClusterId(next.id); switchNote(next.notes[0]?.id || ""); setSearch("");
+    }
+  };
   useEffect(() => {
     const timer = window.setTimeout(() => setToast(""), 3000); return () => window.clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.isComposing || setup || storageOpen || folderDialog || deleting || reloading) return;
+      if (e.isComposing || setup || storageOpen || folderDialog || deleting || deletingFolderId || reloading) return;
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); addNote(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault(); if (workspaceRef.current) save(workspaceRef.current);
       }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
-  }, [addNote, save, setup, storageOpen, folderDialog, deleting, reloading]);
+  }, [addNote, save, setup, storageOpen, folderDialog, deleting, deletingFolderId, reloading]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -281,16 +314,19 @@ export default function App() {
     <div className="app-body">
       <aside className="sidebar">
         <div className="sidebar-label"><span>NOTE 夹</span><button className="icon-button" aria-label="新建 note 夹" title="新建 note 夹" onClick={() => { setFolderName(""); setFolderDialog("new"); }}><Icon name="plus" size={16} /></button></div>
-        <nav className="folder-list" aria-label="Note 夹">{workspace.clusters.map(c => <button className={"folder" + (c.id === clusterId ? " active" : "")} key={c.id} style={{ "--folder-color": c.color } as CSSProperties} onClick={() => { setClusterId(c.id); switchNote(c.notes[0]?.id || ""); setSearch(""); }}>
-          <Icon name="folder" /><span>{c.name}</span><small>{c.notes.length}</small>
-        </button>)}</nav>
+        <nav className="folder-list-nav" aria-label="Note 夹"><SortableList className="folder-list" items={workspace.clusters} label={c => c.name} onReorder={reorderClusters} render={c => <div className="folder-entry">
+          <button data-drag-surface className={"folder" + (c.id === clusterId ? " active" : "")} style={{ "--folder-color": c.color } as CSSProperties} onClick={() => { setClusterId(c.id); switchNote(c.notes[0]?.id || ""); setSearch(""); }}>
+            <Icon name="folder" /><span>{c.name}</span><small>{c.notes.length}</small>
+          </button>
+          <button className="folder-delete" aria-label={`删除 note 夹 ${c.name}`} title={workspace.clusters.length === 1 ? "至少保留一个 note 夹" : `删除 note 夹 ${c.name}`} disabled={workspace.clusters.length === 1} onClick={() => setDeletingFolderId(c.id)}><Icon name="trash" size={14} /></button>
+        </div>} /></nav>
         <button className="storage-button" onClick={() => setStorageOpen(true)}><Icon name="settings" size={16} /><span>数据目录<small>{desktop ? "保存在此设备" : "浏览器预览"}</small></span></button>
       </aside>
       <main className="workspace">
         <div className="workspace-head"><div className="breadcrumb"><Icon name="folder" size={15} /><span>{cluster.name}</span><button className="icon-button" aria-label="重命名 note 夹" onClick={() => { setFolderName(cluster.name); setFolderDialog("rename"); }}><Icon name="edit" size={13} /></button></div>
           <label className="search"><Icon name="search" size={15} /><input aria-label="搜索当前 note 夹" placeholder="搜索此夹…" value={search} onChange={e => setSearch(e.target.value)} /></label>
         </div>
-        <div className="tabs-row"><nav className="note-tabs" aria-label="夹内便签切换">{visibleNotes.map(n => <button key={n.id} className={n.id === noteId ? "selected" : ""} aria-current={n.id === noteId ? "page" : undefined} title={n.title} onClick={() => switchNote(n.id)}>{n.title || "未命名便签"}</button>)}{search && !visibleNotes.length && <span className="no-results">没有匹配的便签</span>}</nav>
+        <div className="tabs-row"><nav className="note-tabs" aria-label="夹内便签切换">{visibleNotes.length > 0 && <SortableList className="note-tabs-sortable" items={visibleNotes} disabled={!!search.trim()} label={n => n.title || "未命名便签"} onReorder={reorderNotes} render={n => <button data-drag-surface className={n.id === noteId ? "selected" : ""} aria-current={n.id === noteId ? "page" : undefined} title={n.title} onClick={() => switchNote(n.id)}>{n.title || "未命名便签"}</button>} />}{search && !visibleNotes.length && <span className="no-results">没有匹配的便签</span>}</nav>
           <button className="icon-button new-note" title="新建便签 · Ctrl+Shift+N" aria-label="新建便签" onClick={addNote}><Icon name="plus" /></button>
         </div>
         {saveError && <div className="save-error" role="alert"><span>{saveError}</span><button onClick={() => workspaceRef.current && save(workspaceRef.current)}>重试保存</button>{desktop && <button onClick={() => void reloadFiles(true)}>保留副本并重新载入</button>}</div>}
@@ -317,6 +353,7 @@ export default function App() {
     {storageOpen && <Modal title="数据目录" onClose={() => setStorageOpen(false)}><DirectoryForm current={dataDir} suggested={suggested} migrating onApply={applyDirectory} onCancel={() => setStorageOpen(false)} onReload={() => reloadFiles()} canReload={saveState === "saved"} /></Modal>}
     {folderDialog && <Modal title={folderDialog === "new" ? "新建 note 夹" : "重命名 note 夹"} onClose={() => setFolderDialog(null)}><form onSubmit={e => { e.preventDefault(); submitFolder(); }}><label className="field"><span>名称</span><input aria-label="Note 夹名称" value={folderName} onChange={e => setFolderName(e.target.value)} maxLength={80} /></label><div className="modal-actions"><button type="button" className="button" onClick={() => setFolderDialog(null)}>取消</button><button className="button primary" disabled={!folderName.trim()}>保存</button></div></form></Modal>}
     {deleting && <Modal title="删除便签" onClose={() => setDeleting(false)}><p className="hint">将删除「{note?.title || "未命名便签"}」及其内容。</p><div className="modal-actions"><button className="button" onClick={() => setDeleting(false)}>取消</button><button className="button danger-solid" onClick={deleteNote}>确认删除</button></div></Modal>}
+    {folderToDelete && <Modal title="永久删除 note 夹" onClose={() => setDeletingFolderId("")}><p className="hint">将永久删除「{folderToDelete.name}」及其中 {folderToDelete.notes.length} 张便签的 Markdown 文件，无法从 DeskTodo 恢复。</p><p className="hint">夹内未由 DeskTodo 管理的附件会保留。</p><div className="modal-actions"><button className="button" onClick={() => setDeletingFolderId("")}>取消</button><button className="button danger-solid" onClick={deleteFolder}>确认永久删除</button></div></Modal>}
     {toast && <div className="toast" role="status">{toast}</div>}
     {reloading && <div className="overlay loading-overlay" role="status" aria-live="polite"><div className="reload-card">正在载入便签文件…</div></div>}
   </div>;

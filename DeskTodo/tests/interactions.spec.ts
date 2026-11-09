@@ -176,3 +176,66 @@ test("clipboard copies markdown without making a duplicate; read failure keeps t
   await expect(page.getByRole("heading", { name: "暂时无法读取便签" })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("desktodo-workspace-v2"))).toBe("{ broken");
 });
+
+test("folders and notes reorder with keyboard, and folder deletion is explicit", async ({ page }) => {
+  await start(page);
+  await page.locator(".new-note").click();
+  await page.getByRole("textbox", { name: "便签标题", exact: true }).fill("Second");
+  await page.locator(".new-note").click();
+  await page.getByRole("textbox", { name: "便签标题", exact: true }).fill("Third");
+  const notes = page.locator(".note-tabs button");
+  await expect(notes).toHaveCount(3);
+  await notes.last().locator("..").press("Alt+ArrowUp");
+  await expect(notes.nth(1)).toHaveText("Third");
+
+  await page.locator(".sidebar-label button").click();
+  await page.locator(".modal input").fill("Archive");
+  await page.locator(".modal .primary").click();
+  await expect(page.locator(".folder")).toHaveCount(2);
+  await page.locator(".folder-delete").last().click();
+  await expect(page.locator(".modal")).toContainText("永久");
+  await page.locator(".modal .button:not(.danger-solid)").click();
+  await expect(page.locator(".folder")).toHaveCount(2);
+  await page.locator(".folder-delete").last().click();
+  await page.locator(".modal .danger-solid").click();
+  await expect(page.locator(".folder")).toHaveCount(1);
+});
+
+test("dragging folders and notes persists their order without switching the active note", async ({ page }) => {
+  await start(page);
+  const title = page.getByRole("textbox", { name: "便签标题", exact: true });
+  await title.fill("First");
+  await page.getByRole("button", { name: "新建便签", exact: true }).click();
+  await title.fill("Second");
+  const tabs = page.locator(".note-tabs button");
+  await tabs.last().dragTo(tabs.first());
+  await expect(tabs).toHaveText(["Second", "First"]);
+  await expect(title).toHaveValue("Second");
+
+  await page.getByRole("button", { name: "新建 note 夹", exact: true }).click();
+  await page.getByRole("textbox", { name: "Note 夹名称", exact: true }).fill("Archive");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await title.fill("Archive note");
+  const folders = page.locator(".folder");
+  await folders.last().dragTo(folders.first());
+  await expect(folders.first()).toContainText("Archive");
+  await expect(title).toHaveValue("Archive note");
+  await page.reload();
+  await expect(folders.first()).toContainText("Archive");
+  await folders.last().click();
+  await expect(tabs).toHaveText(["Second", "First"]);
+  await expect(title).toHaveValue("Second");
+  await page.getByRole("textbox", { name: "搜索当前 note 夹", exact: true }).fill("First");
+  await expect(page.locator(".note-tabs .sortable-item")).toHaveAttribute("draggable", "false");
+  await page.getByRole("textbox", { name: "搜索当前 note 夹", exact: true }).fill("");
+
+  // Deleting another folder leaves the editor and its selection intact.
+  await page.getByRole("button", { name: "删除 note 夹 Archive", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("1 张便签");
+  await page.getByRole("button", { name: "确认永久删除", exact: true }).click();
+  await expect(title).toHaveValue("Second");
+  await expect(page.locator(".folder-delete")).toBeDisabled();
+  await page.reload();
+  await expect(folders).toHaveCount(1);
+  await expect(tabs).toHaveText(["Second", "First"]);
+});

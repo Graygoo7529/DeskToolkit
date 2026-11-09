@@ -44,7 +44,8 @@ kbd { font: 10px "Segoe UI", sans-serif; padding: 2px 5px; border: 1px solid #44
 .app-body { flex: 1; display: flex; min-height: 0; }
 .sidebar { width: 186px; flex: none; display: flex; flex-direction: column; padding: 23px 11px 17px; background: linear-gradient(180deg, #ffffff03, transparent 50%), #11172288; border-right: 1px solid #ffffff0b; backdrop-filter: blur(20px); }
 .sidebar-label { display: flex; align-items: center; justify-content: space-between; padding: 0 9px 12px; color: #7a8aa7; font-size: 11px; font-weight: 600; letter-spacing: 1.3px; }
-.folder-list { overflow-y: auto; display: grid; gap: 5px; }
+.folder-list-nav { flex: 1; min-height: 0; overflow-y: auto; }
+.folder-list { display: grid; gap: 5px; }
 .folder { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #98a9c3; text-align: left; min-width: 0; transition: color .18s ease, background .18s ease, border-color .18s ease, transform .18s ease; }
 .folder > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder svg { color: var(--folder-color); flex: none; opacity: .8; }
@@ -449,4 +450,41 @@ input[type="checkbox"] { accent-color: #83cdb1; width: 17px; height: 17px; curso
   border-top-color: #2c3744;
   color: #b1bbc5;
   background: #111922;
+}
+
+/* Sortable navigation keeps the folder and note controls light while giving the
+   dragged item enough room to animate between its neighbours. */
+.sortable-list { min-width: 0; }
+.sortable-item { min-width: 0; position: relative; transition: opacity .18s ease, filter .18s ease; }
+.sortable-item.dragging { opacity: .42; filter: saturate(.65); }
+.sortable-item.drop-target::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px #91a9ed66, 0 0 16px #91a9ed22;
+  inset: -2px;
+}
+.folder-entry { display: flex; align-items: stretch; gap: 3px; min-width: 0; }
+.folder-entry .folder { flex: 1; min-width: 0; }
+.folder-delete {
+  flex: none;
+  width: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #71809a;
+  background: transparent;
+  opacity: 0;
+  transition: opacity .16s ease, color .16s ease, background .16s ease, border-color .16s ease;
+}
+.folder-entry:hover .folder-delete,
+.folder-entry:focus-within .folder-delete { opacity: 1; }
+.folder-delete:hover:not(:disabled) { color: #e4a6aa; background: #a36c6c18; border-color: #c47c7c33; }
+.folder-delete:disabled { cursor: not-allowed; opacity: .22; }
+.note-tabs-sortable { display: flex; align-items: center; gap: 4px; min-width: max-content; }
+.note-tabs-sortable .sortable-item { flex: 0 0 auto; }
+.note-tabs-sortable .sortable-item > button { width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .sortable-item, .folder-delete { transition: none; }
 }
