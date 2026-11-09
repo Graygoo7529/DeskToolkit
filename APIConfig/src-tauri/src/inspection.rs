@@ -597,6 +597,11 @@ mod tests {
                         Err(e) => panic!("mock server: {e}"),
                     }
                 };
+                // A non-blocking listener can yield an accepted stream that is
+                // still non-blocking on Windows. Switch the stream back before
+                // reading the HTTP request; otherwise WSAEWOULDBLOCK (10035)
+                // can make this fixture exit before it sends its response.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
                     .unwrap();

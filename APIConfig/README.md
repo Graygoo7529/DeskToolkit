@@ -68,6 +68,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
+CI 在 Windows 上执行同一组构建、前端交互测试、Rust 测试和格式检查。Rust 查询测试只访问进程内的本地 HTTP mock，不会连接真实 Provider；本地 mock 在读取请求前会将接受到的 TCP 流切回阻塞模式，以兼容 Windows 的非阻塞 socket 行为。
+
 正式版使用 `pnpm tauri build` 构建（`pnpm release` 是同一命令的别名）。它会先生成前端资源，再由 Tauri 将资源嵌入原生程序并生成安装包；不要使用单独的 `cargo build --release` 作为发布构建。exe 位于 `src-tauri/target/release/apiconfig.exe`，安装包位于 `src-tauri/target/release/bundle/`。首次使用便携版时保留 exe 旁的 `definitions/` 文件夹；初始化后仅从所选数据目录加载定义。
 
 调试端口为 **1430**。浏览器交互测试使用独立端口 **1431** 和本机 Microsoft Edge，以模拟数据替代 Tauri IPC，不读取实际用户配置或密钥。Rust HTTP 测试仅访问本地临时服务。
