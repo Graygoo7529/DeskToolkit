@@ -12,6 +12,14 @@ DeskTodo 适合记录那些“现在不记，过一会儿就会忘”的内容�
 
 当便签逐渐变多，可以用文件夹按主题归档，再通过标签页快速切换。每张便签在底层都是独立的 Markdown 文件，既能在 DeskTodo 中编辑，也能直接用其他编辑器打开。这样笔记不会被锁死在单一应用里，日常备份和迁移目录都很直观。
 
+
+
+![01-desktodo-本周待办](README-supplyment.assets/01-desktodo-本周待办.png)
+
+![02-desktodo-线性代数复习](README-supplyment.assets/02-desktodo-线性代数复习.png)
+
+
+
 ## DeskFinger：让项目一打开就进入状态
 
 每次开始写代码或推进项目前，往往要先翻找项目目录，再依次打开编辑器、终端、参考网页和几份文档。DeskFinger 处理的就是这种固定却繁琐的准备工作。
@@ -20,6 +28,14 @@ DeskTodo 适合记录那些“现在不记，过一会儿就会忘”的内容�
 
 每张项目卡片都附带一份 Markdown 文档，方便顺手记下启动步骤、常用命令、环境说明或当前进度。DeskFinger 只记录资源的路径，不会复制或挪动原有文件，更像一个轻量的项目启动台与备忘录。
 
+
+
+![03-deskfinger-项目卡片](README-supplyment.assets/03-deskfinger-项目卡片.png)
+
+![04-deskfinger-快速启动](README-supplyment.assets/04-deskfinger-快速启动.png)
+
+
+
 ## APIConfig：把 API 配置放到看得见的地方
 
 使用 Codex、Claude Code 或各类第三方 API 服务时，填一次地址并不麻烦，麻烦的是时间一长，很难记清各个地址、密钥和配置目录之间的对应关系。
@@ -27,6 +43,14 @@ DeskTodo 适合记录那些“现在不记，过一会儿就会忘”的内容�
 APIConfig 把这些对应关系直观地摆在了同一个界面里。左侧用来整理不同的服务商来源，右侧则显示 Codex 或 Claude 正在使用的配置目录。选中某个来源后，就能直接将它写入对应的工具配置中；需要排查问题时，也可以顺手做一次连接检查、模型列表拉取或额度查询。
 
 如果只是想临时测试某个新 API 能不能连通、支持哪些模型，或者横向对比几家服务，可以直接使用内置的 API Probe。它提供了独立的检测入口，不必先把测试参数写进开发工具的正式配置里。
+
+
+
+![05-apiconfig-codex配置](README-supplyment.assets/05-apiconfig-codex配置.png)
+
+![06-apiconfig-api-probe](README-supplyment.assets/06-apiconfig-api-probe.png)
+
+
 
 ## DeskAuth 与 2FAuth：把账户资料整理得有迹可循
 
@@ -37,6 +61,12 @@ DeskAuth 把平台名称、用户名、密码、联系方式、备注和 TOTP �
 2FAuth 则单独把动态验证码这件事拎了出来。它支持手动输入密钥，或是直接导入认证链接与二维码图片。验证码完全在本机计算生成，界面上只保留清晰的倒计时和复制入口，同时支持按组整理账户，以及逐条保存和标记平台恢复码的使用状态。应用内的联网校时功能默认关闭，开启后也仅用于修正内部计算偏差，不会改动系统时间。
 
 这两个工具分工很明确：DeskAuth 负责管理完整的账户档案，2FAuth 专注处理两步验证与恢复码。两者都不需要注册账号，也不做云端同步。
+
+
+
+![07-deskauth-账户详情](README-supplyment.assets/07-deskauth-账户详情.png)
+
+![08-2fauth-验证码](README-supplyment.assets/08-2fauth-验证码.png)
 
 ## 共同的底色：看得见的本地文件，顺手的操作
 
@@ -49,3 +79,7 @@ DeskAuth 把平台名称、用户名、密码、联系方式、备注和 TOTP �
 ---
 
 DeskToolkit 是我在日常学习、开发和整理账户时边用边写的个人项目，主要为了解决自己手头的痛点，代码和思路也公开出来供有相似需求的朋友参考。因为是个人维护的工具，使用前建议先了解它们保存数据的方式，重要资料记得做好本地备份。
+
+
+
+注：以上界面截图由 Grok Bot 在助手电脑构建项目后截取，人物身份和数据为虚拟数据。

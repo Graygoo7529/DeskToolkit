@@ -16,6 +16,10 @@ DeskToolkit 是我围绕日常学习、开发和账户管理，逐步做出来�
 
 [查看 DeskTodo 使用与构建说明](DeskTodo/README.md)
 
+
+
+![desktodo-线性代数复习](README.assets/02-desktodo-线性代数复习.png)
+
 ## DeskFinger：把一个项目需要的东西放在一起
 
 开始一个项目，往往要先打开文件夹、编辑器、参考网页和终端，再输入几条命令。DeskFinger 用项目卡片把这些入口集中起来，让“进入工作状态”少一些重复操作。
@@ -23,6 +27,10 @@ DeskToolkit 是我围绕日常学习、开发和账户管理，逐步做出来�
 每个项目都可以添加文件夹、程序、文档、网页和终端命令，也可以直接拖入资源。常用动作可以组合成一键启动流程，例如先打开项目目录，再打开编辑器、终端和参考文档。项目内还带有 Markdown 文档区，可以记录启动步骤、常用命令和项目说明。它只保存外部资源的路径，不会搬动原有文件。
 
 [查看 DeskFinger 使用说明](DeskFinger/README.md)
+
+
+
+![deskfinger-快速启动](README.assets/04-deskfinger-快速启动.png)
 
 ## APIConfig：集中管理 API 来源与开发工具配置
 
@@ -32,6 +40,10 @@ DeskToolkit 是我围绕日常学习、开发和账户管理，逐步做出来�
 
 [查看 APIConfig 使用与构建说明](APIConfig/README.md)
 
+
+
+![apiconfig-api-probe](README.assets/06-apiconfig-api-probe.png)
+
 ## DeskAuth：整理账户，也理清账户之间的联系
 
 一个平台可能有多个账户，一个邮箱或手机号又可能关联多个平台。DeskAuth 将平台、用户名、密码、联系方式、备注和 TOTP 认证器整理在同一份账户资料中，方便查找和复制。
@@ -40,6 +52,10 @@ DeskToolkit 是我围绕日常学习、开发和账户管理，逐步做出来�
 
 [查看 DeskAuth 使用与构建说明](DeskAuth/README.md)
 
+
+
+![deskauth-账户详情](README.assets/07-deskauth-账户详情.png)
+
 ## 2FAuth：专注动态验证码的小工具
 
 如果想把双因素认证集中管理，2FAuth 提供了一个直接的入口。它支持手动输入密钥、导入认证链接或二维码图片，在本机生成标准 TOTP 动态验证码，并显示倒计时和复制入口。
@@ -47,6 +63,10 @@ DeskToolkit 是我围绕日常学习、开发和账户管理，逐步做出来�
 账户可以分组和收藏，也能保存平台提供的恢复码并标记使用状态。工具无需注册，不提供云端同步；可选的联网校时用于修正验证码计算时间，默认关闭，也不会修改系统时间。
 
 [查看 2FAuth 使用与构建说明](2FAuth/README.md)
+
+
+
+![2fauth-验证码](README.assets/08-2fauth-验证码.png)
 
 ## 这些工具有什么共同点
 
@@ -93,3 +113,5 @@ DeskFinger 使用 npm 安装依赖时，可用 `npm run tauri -- build` 构建�
 这些工具是我通过持续的个人实践和 vibe coding 做出来的产出，主要服务于自己的学习、开发和日常管理，也希望能给遇到相似问题的人一些参考。它们不承诺生产级的可靠性、通用性或安全性，请根据自己的需求和风险判断是否使用。
 
 项目地址：[GitHub · DeskToolkit](https://github.com/Graygoo7529/DeskToolkit)
+
+项目中的界面截图由 Grok Bot 在助手电脑构建项目后截取，人物身份和数据为虚拟数据。
