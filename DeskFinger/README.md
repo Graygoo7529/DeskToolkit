@@ -17,3 +17,20 @@ DeskFinger 是一个用于管理桌面项目、快速启动项、一键启动流
 - 软件只保存外部资源的路径链接，不拷贝被启动的文件夹、程序或文档资源本身。
 
 这是一个通过 vibe coding 完成的小型个人产出，不具有严谨性、通用性和使用安全性，仅供我个人使用和参考。
+
+## 开发与构建
+
+需要 Node.js、pnpm、Rust stable MSVC 工具链、Visual Studio C++ 构建工具和 WebView2 Runtime。当前项目保留 `package-lock.json`，安装前端依赖使用：
+
+```powershell
+npm ci
+```
+
+Tauri 开发和构建统一使用：
+
+```powershell
+pnpm tauri dev
+pnpm tauri build
+```
+
+Tauri 配置会在执行命令前调用 `pnpm dev` 或 `pnpm build`，因此运行 Tauri 命令的终端必须能够找到 pnpm。

@@ -106,7 +106,7 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-DeskFinger 使用 npm 安装依赖时，可用 `npm run tauri -- build` 构建。PowerShell 如果限制 `pnpm.ps1`，可以将命令写成 `pnpm.cmd`。构建产物位于项目的 `src-tauri/target/release/` 和 `bundle/` 目录；`target` 中的依赖缓存可以清理，发布用的 `.exe` 和安装包应保留。
+DeskFinger 当前使用 `npm ci` 安装依赖；Tauri 开发和构建仍统一使用 `pnpm tauri dev` 与 `pnpm tauri build`。PowerShell 如果限制 `pnpm.ps1`，可以使用 `pnpm.cmd`。 构建产物位于项目的 `src-tauri/target/release/` 和 `bundle/` 目录；`target` 中的依赖缓存可以清理，发布用的 `.exe` 和安装包应保留。
 
 各项目的 GitHub Actions 会按项目执行前端构建、交互测试、Rust 格式检查和 Rust 测试，具体组合见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。APIConfig 的 Rust 查询测试只访问本地模拟服务，不会连接真实 Provider；Windows 下的 socket 兼容处理说明见 [APIConfig README](APIConfig/README.md)。
 
